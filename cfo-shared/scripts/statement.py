@@ -36,6 +36,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -104,7 +105,53 @@ def categorize(description: str) -> str:
 # reading the file
 # --------------------------------------------------------------------------
 
-def read_text(path: Path) -> tuple[str, str]:
+def pdf_to_text(path: Path, password: str | None = None) -> str:
+    """Extract a PDF's text, in the container, via uv.
+
+    The image carries no PDF library and no pip -- but it does carry uv, and
+    the agent found that on its own the first time it met a PDF. Better to
+    make it the tool's own path than to leave the agent improvising a
+    one-liner whose traceback lands on someone's phone.
+    """
+    import subprocess
+    helper = Path(__file__).resolve().parent / "pdf_text.py"
+    env = dict(os.environ)
+    if password:
+        env["CFO_PDF_PASSWORD"] = password       # env, never argv
+    # --no-project and a neutral cwd, both deliberate: the agent's working
+    # directory is /opt/hermes, which holds the gateway's own pyproject.toml.
+    # Without these, `uv run` tries to build hermes-agent as an editable
+    # install and dies on a directory the agent's uid cannot write -- an
+    # error about egg-info timestamps that says nothing about PDFs at all.
+    proc = subprocess.run(
+        ["uv", "run", "--quiet", "--no-project", "--with", "pypdf",
+         "python3", str(helper), str(path)],
+        capture_output=True, text=True, env=env, timeout=180, cwd="/tmp")
+    if proc.returncode == 0:
+        return proc.stdout
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except ValueError:
+        payload = {}
+    if not payload.get("error"):
+        # An empty payload once swallowed the real cause entirely, and the
+        # agent told the owner "I could not read this PDF" about a file that
+        # was merely locked. Never lose the reason.
+        payload["error"] = ((proc.stderr or "").strip()[-300:]
+                            or "could not read the PDF")
+    raise PdfLocked(payload) if payload.get("needs_password") else SystemExit(
+        payload.get("error", "could not read the PDF"))
+
+
+class PdfLocked(Exception):
+    def __init__(self, payload):
+        super().__init__(payload.get("error", "password required"))
+        self.payload = payload
+
+
+def read_text(path: Path, password: str | None = None) -> tuple[str, str]:
+    if path.suffix.lower() == ".pdf":
+        return pdf_to_text(path, password), "pdf"
     raw = path.read_bytes()
     for enc in ENCODINGS:
         try:
@@ -114,13 +161,13 @@ def read_text(path: Path) -> tuple[str, str]:
     return raw.decode("utf-8", errors="replace"), "utf-8/replace"
 
 
-def sniff(path: Path) -> dict:
+def sniff(path: Path, password: str | None = None) -> dict:
     """What the model needs to propose a mapping, and nothing else.
 
     Deliberately a SAMPLE, not the file: the point of this design is that the
     statement's hundreds of rows never enter a prompt.
     """
-    text, encoding = read_text(path)
+    text, encoding = read_text(path, password)
     lines = [l for l in text.splitlines() if l.strip()]
     if not lines:
         raise SystemExit("statement is empty")
@@ -269,7 +316,7 @@ def row_hash(day: str, cents: int, description: str) -> str:
 # applying
 # --------------------------------------------------------------------------
 
-def extract(path: Path, mapping: dict) -> tuple[list[dict], list[dict]]:
+def extract(path: Path, mapping: dict, password: str | None = None) -> tuple[list[dict], list[dict]]:
     """Every row in the file, normalised. No sampling, no model, no guessing.
 
     `mapping` names the columns and the sign convention:
@@ -279,10 +326,10 @@ def extract(path: Path, mapping: dict) -> tuple[list[dict], list[dict]]:
          "debit": "Débito", "credit": "Crédito",   # instead of one amount
          "date_format": "%d/%m/%Y"}                # optional hint
     """
-    info = sniff(path)
+    info = sniff(path, password)
     if info.get("format") == "text" or mapping.get("format") == "text":
-        return extract_text(path, mapping)
-    text, _ = read_text(path)
+        return extract_text(path, mapping, password)
+    text, _ = read_text(path, password)
     lines = [l for l in text.splitlines() if l.strip()]
     body = "\n".join(lines[info["header_line"] - 1:])
     reader = csv.DictReader(io.StringIO(body), delimiter=info["delimiter"])
@@ -348,9 +395,9 @@ def normalise_sign(raw: str) -> str:
     return ("-" if negative else "") + s
 
 
-def extract_text(path: Path, mapping: dict) -> tuple[list[dict], list[dict]]:
+def extract_text(path: Path, mapping: dict, password: str | None = None) -> tuple[list[dict], list[dict]]:
     """The same normalised rows, from a de-PDF'd statement."""
-    text, _ = read_text(path)
+    text, _ = read_text(path, password)
     sign = mapping.get("sign", "negative_is_expense")
     date_format = mapping.get("date_format")
     rows, rejected = [], []
@@ -389,8 +436,8 @@ def existing_hashes(con) -> set[str]:
 
 
 def apply(con, path: Path, mapping: dict, dry_run: bool = True,
-          batch: str | None = None) -> dict:
-    rows, rejected = extract(path, mapping)
+          batch: str | None = None, password: str | None = None) -> dict:
+    rows, rejected = extract(path, mapping, password)
     if not rows:
         raise SystemExit("no readable transactions -- check the mapping")
 
@@ -565,10 +612,14 @@ def main(argv=None) -> int:
 
     i = sub.add_parser("inspect", help="headers and a sample, to build a mapping")
     i.add_argument("file")
+    i.add_argument("--password", default=None,
+                   help="for a locked PDF; used once and never stored")
 
     a = sub.add_parser("apply", help="import rows using a column mapping")
     a.add_argument("file")
     a.add_argument("--map", required=True, help="JSON, or @path to a JSON file")
+    a.add_argument("--password", default=None,
+                   help="for a locked PDF; used once and never stored")
     a.add_argument("--commit", action="store_true",
                    help="actually write; without it this is a dry run")
 
@@ -583,13 +634,13 @@ def main(argv=None) -> int:
     cur = m.currency_of(con)
 
     if args.cmd == "inspect":
-        m.emit(sniff(Path(args.file).expanduser()), cur)
+        m.emit(sniff(Path(args.file).expanduser(), args.password), cur)
     elif args.cmd == "apply":
         raw = args.map
         mapping = json.loads(Path(raw[1:]).expanduser().read_text()
                              if raw.startswith("@") else raw)
         m.emit(apply(con, Path(args.file).expanduser(), mapping,
-                     dry_run=not args.commit), cur)
+                     dry_run=not args.commit, password=args.password), cur)
     elif args.cmd == "undo":
         m.emit(undo(con, args.batch), cur)
     elif args.cmd == "batches":
@@ -616,6 +667,9 @@ def _run(fn, argv):
     import traceback
     try:
         return fn(argv)
+    except PdfLocked as exc:
+        print(json.dumps({**exc.payload, "ok": False}, ensure_ascii=False))
+        return 2
     except SystemExit as exc:
         if exc.code in (0, None):
             raise

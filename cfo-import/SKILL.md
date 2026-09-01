@@ -28,36 +28,40 @@ the Mac:
 Read the file through Latch and write it to `/opt/data/inbox/<filename>`.
 Never point the importer at a path on the Mac; the container cannot see it.
 
-## 1b. If it is a PDF, convert it on the Mac first
+## 1b. PDFs, including locked ones
 
-**The container has no PDF library and no `pip`** — do not try to install one,
-and do not reach for another skill's OCR script. The Mac is where a PDF
-becomes text, and Latch is how you get there:
+**The importer reads PDFs itself.** Pass the file straight to `inspect` —
+there is no conversion step, nothing to install, and nothing to do on the Mac:
 
-    pdftotext -layout statement.pdf /tmp/statement.txt
+```sh
+python3 .../statement.py inspect /opt/data/inbox/extrato.pdf
+```
 
-`-layout` is not optional: without it the columns collapse and the amounts
-stop lining up with their dates.
+It extracts the text in this container through `uv`, which the image already
+carries. **Do not write your own extraction code, and do not borrow another
+skill's OCR script** — one such one-liner already put a forty-line traceback
+on someone's phone as the answer to "import my statement".
 
-**Brazilian bank PDFs are usually password-protected, and plenty of banks
-elsewhere do the same.** If the file is locked, ask the owner for the password
-— it is commonly their CPF, a birth date, or the first digits of the account:
+If the PDF is locked, the tool answers with `needs_password: true` rather than
+failing. That is a question for the owner, not an error to report:
 
-    pdftotext -layout -upw <password> statement.pdf /tmp/statement.txt
+> Esse extrato está protegido por senha. Qual é? Costuma ser o CPF, a data de
+> nascimento ou os primeiros dígitos da conta.
 
-Ask for it in its own message, use it once, and **never write it anywhere** —
-not into a note, not into the ledger, not into `/opt/data`.
+Then pass it once:
 
-If `pdftotext` is missing on that Mac, say so in one line and offer the two
-ways out, in this order:
+```sh
+python3 .../statement.py inspect /opt/data/inbox/extrato.pdf --password <senha>
+python3 .../statement.py apply  /opt/data/inbox/extrato.pdf --map '<json>' --password <senha>
+```
 
-  1. **Export CSV or OFX from the bank instead** — every bank offers one, it
-     is cleaner than a PDF, and there is nothing to install. Prefer this.
-  2. `brew install poppler`, if they would rather convert the PDF.
+**Never write the password anywhere** — not to a file, not into a note, not
+into the ledger, not into a summary you send back. It travels in the
+environment, never in a command line the host can read, and it is used once
+per call.
 
-Then copy the `.txt` into `/opt/data/inbox/` and continue below — the importer
-detects a de-PDF'd layout on its own and needs `{"format": "text"}` in the
-mapping.
+A PDF with no text layer is a scan. Do not attempt OCR: ask for the bank's CSV
+or OFX export instead, which every bank offers and which is cleaner anyway.
 
 ## 2. Look at its shape — not at its contents
 
