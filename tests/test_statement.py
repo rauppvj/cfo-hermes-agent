@@ -393,7 +393,7 @@ def test_the_range_shown_is_per_month_not_per_payment(st, con):
     # a small extra settlement from the same payer, mid-month
     for month in (6, 7, 8):
         m.add_tx(con, 6437, "income", "other",
-                 note="PAGADOR EXEMPLO LTDA #" + f"{month:016x}",
+                 note=f"PAGADOR EXEMPLO LTDA #{month:016x}",
                  source="import:test",
                  when=datetime(2026, month, 20, 12, 0,
                                tzinfo=m.ZoneInfo("America/Sao_Paulo")))
@@ -416,3 +416,36 @@ def test_a_confirmed_income_makes_the_projection_usable(st, con):
               str(found["suggested_expected_income_cents"]))
     assert m.basis(con)["has_income"] is True
     assert m.project_month(con)["projected_income"] >= 700000
+
+
+def test_money_moved_between_your_own_accounts_is_not_income(st, con):
+    """It arrives as a payer with the owner's own name on it, repeatedly, and
+    it overstated this owner's income by about R$700 a month until excluded."""
+    import money as m
+    st.apply(con, LAYOUT, LAYOUT_MAP, dry_run=False)
+    # A standing order between the owner's own accounts: same day, same
+    # amount, every month. Perfectly stable -- so it lands among the REGULAR
+    # candidates and gets proposed as a salary, which is the tidiest possible
+    # version of the mistake.
+    for month in (6, 7, 8):
+        m.add_tx(con, 350000, "income", "other",
+                 note=f"Vinicius Raupp da Silva Joaquim #{month:016x}",
+                 source="import:test",
+                 when=datetime(2026, month, 9, 12, 0,
+                               tzinfo=m.ZoneInfo("America/Sao_Paulo")))
+
+    before = st.detect_recurring(con)
+    assert any("Vinicius" in c["label"] for c in before["income_candidates"]), (
+        "precondition: a standing self-transfer reads as a regular salary")
+
+    m.set_cfg(con, "owner_name", "Vinicius Raupp da Silva Joaquim")
+    after = st.detect_recurring(con)
+
+    # Worse than inflating the total: being perfectly stable, the transfer
+    # was the ONLY "regular" candidate, so it REPLACED the real payer and
+    # the proposed income came back as the size of the transfer rather than
+    # of the salary. Excluding it restores the actual earner.
+    assert after["income_candidates"] == []
+    assert after["primary_payer"]["label"].startswith("PAGADOR")
+    assert before["suggested_expected_income_cents"] == 350000
+    assert after["suggested_expected_income_cents"] > 800000

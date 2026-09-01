@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -453,6 +454,60 @@ def _next_step(con, b) -> str | None:
     return None
 
 
+def uncategorized(con, limit: int = 40) -> dict:
+    """The merchants the rules could not place, worst first.
+
+    Keyword rules get the chains and miss everything local -- which in a real
+    statement is most of it. Naming a merchant is classification, not
+    arithmetic, and a model is genuinely good at it, so this hands it the
+    SHORT list: distinct payees, deduplicated, with what each one costs. A
+    hundred and fifty rows becomes twenty names.
+    """
+    rows = con.execute(
+        "SELECT note, COUNT(*) AS n, SUM(amount_cents) AS total FROM tx"
+        " WHERE category = 'other' AND kind = 'expense'"
+        " GROUP BY note ORDER BY total DESC").fetchall()
+
+    merchants: dict[str, dict] = {}
+    for r in rows:
+        label = re.sub(r"\s*#[0-9a-f]{16}$", "", r["note"] or "").strip()
+        key = label.lower()[:40]
+        if key not in merchants:
+            merchants[key] = {"merchant": label, "count": 0, "total": 0}
+        merchants[key]["count"] += int(r["n"])
+        merchants[key]["total"] += int(r["total"])
+
+    ranked = sorted(merchants.values(), key=lambda x: -x["total"])[:limit]
+    total_other = sum(m["total"] for m in merchants.values())
+    return {
+        "merchants": ranked,
+        "distinct": len(merchants),
+        "total_uncategorised": total_other,
+        "categories": DEFAULT_CATEGORIES,
+        "next": ("classify these by name and write them back with "
+                 "`recategorize --map '{\"MERCHANT\": \"category\"}'`; "
+                 "leave anything genuinely unclear as other"),
+    }
+
+
+def recategorize(con, mapping: dict) -> dict:
+    """Apply a merchant->category map to every matching transaction."""
+    changed = 0
+    unknown = []
+    for merchant, category in mapping.items():
+        if category not in DEFAULT_CATEGORIES:
+            unknown.append(category)
+            continue
+        cur = con.execute(
+            "UPDATE tx SET category = ? WHERE category = 'other'"
+            " AND kind = 'expense' AND lower(note) LIKE ?",
+            (category, f"%{merchant.lower()}%"))
+        changed += cur.rowcount
+    con.commit()
+    return {"reclassified": changed, "rejected_categories": unknown,
+            "still_other": uncategorized(con)["distinct"]}
+
+
 def recent(con, limit: int = 20) -> list[dict]:
     rows = con.execute(
         "SELECT id, day_local, amount_cents, kind, category, note FROM tx"
@@ -511,6 +566,11 @@ def main(argv=None) -> int:
 
     sub.add_parser("project", help="project this month's close at the current pace")
     sub.add_parser("status", help="where this person stands and what is missing")
+    u = sub.add_parser("uncategorized",
+                       help="merchants the rules could not place, worst first")
+    u.add_argument("--limit", type=int, default=40)
+    rc = sub.add_parser("recategorize", help="apply a merchant->category map")
+    rc.add_argument("--map", required=True, help="JSON, or @path to a file")
 
     sim = sub.add_parser("simulate", help="what a purchase does to the month")
     sim.add_argument("amount")
@@ -560,6 +620,15 @@ def main(argv=None) -> int:
 
     elif args.cmd == "status":
         emit({**status(con), "currency": cur}, cur)
+
+    elif args.cmd == "uncategorized":
+        emit(uncategorized(con, args.limit), cur)
+
+    elif args.cmd == "recategorize":
+        raw = args.map
+        payload = json.loads(Path(raw[1:]).expanduser().read_text()
+                             if raw.startswith("@") else raw)
+        emit(recategorize(con, payload), cur)
 
     elif args.cmd == "project":
         emit({**project_month(con), "currency": cur}, cur)

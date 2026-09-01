@@ -733,6 +733,25 @@ def detect_recurring(con, min_occurrences: int = 3) -> dict:
     #
     # So the biggest recurring payer's own average becomes the proposal, and
     # the spread is reported beside it rather than used to disqualify them.
+    # Money you move between your own accounts is not money you earned.
+    # It shows up as a payer with your own name on it, repeatedly, and it
+    # inflated this owner's income by ~R$700/month until it was excluded.
+    owner = strip_accents(m.get_cfg(con, "owner_name") or "").lower()
+    if owner:
+        parts = [w for w in owner.split() if len(w) > 2]
+        def is_self(label: str) -> bool:
+            flat = strip_accents(label).lower()
+            hits = sum(1 for w in parts if w in flat)
+            return hits >= max(2, len(parts) // 2)
+        # Both lists. A standing order between your own accounts is
+        # perfectly stable, so it lands among the REGULAR candidates and
+        # would otherwise be proposed as a salary -- the tidiest possible
+        # version of the same mistake.
+        for c in variable + income:
+            c["is_self_transfer"] = is_self(c["label"])
+        variable = [c for c in variable if not c["is_self_transfer"]]
+        income = [c for c in income if not c["is_self_transfer"]]
+
     primary = None
     if not income and variable:
         top = variable[0]

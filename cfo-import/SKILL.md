@@ -163,6 +163,50 @@ python3 .../money.py config expected_income 902846   # cents
 Say what it is: a typical month for the projection to lean on, not a promise,
 and something they can change whenever it moves.
 
+### Name the merchants the rules could not
+
+Keyword rules catch the chains and miss everything local, which in a real
+statement is most of it. A summary where half the money sits in "other"
+answers nothing, and the owner can see that.
+
+```sh
+python3 .../money.py uncategorized
+```
+
+Returns the **distinct payees** — deduplicated, worst first, with what each
+costs. A hundred and fifty rows comes back as twenty or thirty names, which is
+a short enough list to read. Naming a merchant is classification, not
+arithmetic: this is a job you are good at and the rules are not.
+
+Classify them from the name and write them back in one call:
+
+```sh
+python3 .../money.py recategorize --map '{"SUPERMERCADO ANGELONI":"groceries","POSTO IPIRANGA":"transport"}'
+```
+
+- Match on a distinctive fragment of the name; it is matched case-insensitively
+  against the whole description.
+- **Leave anything genuinely unclear as `other`.** A confident wrong category
+  is worse than an honest unknown, because it disappears into a total nobody
+  questions.
+- A payment to a card issuer ("PGTO FAT CARTAO") is not spending — it is
+  settling spending already recorded elsewhere. Leave it as `other` and say so
+  if the owner asks why their biggest line is not a category.
+- Then run `uncategorized` again and tell the owner what is left.
+
+### Also record who they are
+
+The statement header carries the account holder's name. Save it:
+
+```sh
+python3 .../money.py config owner_name "NOME COMO ESTA NO EXTRATO"
+```
+
+This is what lets `detect` tell a transfer between the owner's own accounts
+from money they actually earned. Without it, someone who moves money between
+their own banks looks like they have a second job, and their expected income
+is overstated for as long as it goes unnoticed.
+
 Then check `money.py status` — when `next_step` is null they are set up. Say
 so, and stop asking things.
 

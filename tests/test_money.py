@@ -191,3 +191,50 @@ def test_basis_becomes_usable_once_the_month_is_furnished(mod, con):
     con.commit()
     b = mod.project_month(con, today=day)["basis"]
     assert b["usable"] is True and b["reasons"] == []
+
+
+# -- naming the merchants the rules cannot ---------------------------------
+
+def test_uncategorized_returns_distinct_payees_not_rows(mod, con):
+    """The point is to hand a model a SHORT list: a hundred and fifty
+    transactions become twenty names, deduplicated, worst first."""
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    for _ in range(8):
+        mod.add_tx(con, 4000, "expense", "other", note="PADARIA DO ZE", when=day)
+    for _ in range(2):
+        mod.add_tx(con, 90000, "expense", "other", note="DUDA IMOVEIS", when=day)
+    mod.add_tx(con, 5000, "expense", "food", note="already placed", when=day)
+
+    out = mod.uncategorized(con)
+    assert out["distinct"] == 2
+    assert out["merchants"][0]["merchant"] == "DUDA IMOVEIS"   # by value
+    assert out["merchants"][1]["count"] == 8
+    assert all(m["merchant"] != "already placed" for m in out["merchants"])
+
+
+def test_recategorize_applies_by_fragment(mod, con):
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    for _ in range(3):
+        mod.add_tx(con, 4000, "expense", "other",
+                   note="RAIA2116 FLORIANOPOLIS BRA #abc", when=day)
+
+    out = mod.recategorize(con, {"RAIA2116": "health"})
+    assert out["reclassified"] == 3
+    assert mod.by_category(con, "2026-06")[0]["category"] == "health"
+
+
+def test_recategorize_refuses_an_invented_category(mod, con):
+    """A category outside the list would be invisible in every summary."""
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 4000, "expense", "other", note="SOMEWHERE", when=day)
+
+    out = mod.recategorize(con, {"SOMEWHERE": "vibes"})
+    assert out["reclassified"] == 0
+    assert out["rejected_categories"] == ["vibes"]
+
+
+def test_recategorize_never_touches_what_was_already_placed(mod, con):
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 4000, "expense", "groceries", note="MERCADO X", when=day)
+    mod.recategorize(con, {"MERCADO X": "leisure"})
+    assert mod.by_category(con, "2026-06")[0]["category"] == "groceries"
