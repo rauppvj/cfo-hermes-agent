@@ -254,6 +254,48 @@ def month_totals(con, month: str) -> dict:
     return out
 
 
+def day_totals(con, day: str) -> dict:
+    """One day, in the owner's own zone.
+
+    The brief is meant to open with what yesterday cost, and it could not:
+    nothing here returned a single day, and the one rule this agent has
+    forbids the model adding the rows up itself. So it obeyed both rules,
+    dropped its own lead sentence every morning, and sent a monthly
+    projection instead -- which is a bank app, not a manager. The README's
+    own example, "Bom dia. Ontem R$ 87,00.", was unreachable.
+    """
+    rows = con.execute(
+        "SELECT kind, SUM(amount_cents) AS total, COUNT(*) AS n"
+        " FROM tx WHERE day_local = ? GROUP BY kind",
+        (day,),
+    ).fetchall()
+    out = {"day": day, "expense": 0, "income": 0, "count": 0}
+    for r in rows:
+        out[r["kind"]] = int(r["total"] or 0)
+        out["count"] += int(r["n"])
+    out["net"] = out["income"] - out["expense"]
+    out["categories"] = [
+        {"category": r["category"], "total": int(r["total"]), "n": int(r["n"])}
+        for r in con.execute(
+            "SELECT category, SUM(amount_cents) AS total, COUNT(*) AS n FROM tx"
+            " WHERE day_local = ? AND kind = 'expense' GROUP BY category"
+            " ORDER BY total DESC", (day,)).fetchall()
+    ]
+    return out
+
+
+def yesterday_local(con, today=None) -> str:
+    """The day before the owner's today -- resolved in their zone, not UTC.
+
+    At 08:00 in Sao Paulo it is 11:00 UTC, so both agree; at 08:00 in Los
+    Angeles it is 15:00 UTC and they still agree. They part on the first of
+    the month at either edge, which is exactly when the brief is read and
+    exactly when getting it wrong reports an empty day.
+    """
+    now = today or now_local(con)
+    return (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def by_category(con, month: str, kind: str = "expense") -> list[dict]:
     rows = con.execute(
         "SELECT category, SUM(amount_cents) AS total, COUNT(*) AS n FROM tx"
@@ -669,6 +711,9 @@ def main(argv=None) -> int:
     s = sub.add_parser("summary", help="one month's totals and categories")
     s.add_argument("--month", default=None, help="YYYY-MM (default: current)")
 
+    d1 = sub.add_parser("day", help="one day's total (default: yesterday)")
+    d1.add_argument("--on", default=None, help="YYYY-MM-DD (default: yesterday)")
+
     sub.add_parser("project", help="project this month's close at the current pace")
     sub.add_parser("status", help="where this person stands and what is missing")
     u = sub.add_parser("uncategorized",
@@ -726,6 +771,10 @@ def main(argv=None) -> int:
         month = args.month or now_local(con).strftime("%Y-%m")
         emit({**month_totals(con, month), "categories": by_category(con, month),
               "currency": cur}, cur)
+
+    elif args.cmd == "day":
+        when = args.on or yesterday_local(con)
+        emit({**day_totals(con, when), "currency": cur}, cur)
 
     elif args.cmd == "status":
         emit({**status(con), "currency": cur}, cur)

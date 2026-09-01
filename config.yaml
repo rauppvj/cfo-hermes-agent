@@ -10,6 +10,15 @@ group_sessions_per_user: false
 model:
   default: gpt-5.6-sol
   provider: openai-codex
+# The morning brief is the only message this agent sends unprompted, and it is
+# written to read like a person texting you. The image wraps every cron
+# delivery in "Cronjob Response: <name> (job_id: ...)" and an English footer
+# about stopping the reminder, which lands on the owner's phone above a
+# Portuguese sentence about their money and announces that a machine is on a
+# schedule. Present despite the "absent keys mean image defaults" rule: the
+# image default is true.
+cron:
+  wrap_response: false
 mcp_servers:
   # Plow Latch, reached over the Plow relay: the browser and filesystem this
   # agent works on are the operator's Mac, not this container. The relay

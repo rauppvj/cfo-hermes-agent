@@ -14,10 +14,16 @@ one.
 
 ```sh
 S=/opt/data/skills/cfo-shared/scripts
+python3 $S/money.py day            # YESTERDAY -- the first sentence
 python3 $S/money.py project        # pace, projected close, fixed lines
 python3 $S/money.py summary        # month to date, by category
 python3 $S/money.py recent --limit 10
 ```
+
+`day` defaults to yesterday in the owner's zone and is the only source for
+the opening figure. Run it first; without it there is no honest way to say
+what yesterday cost, and a brief that opens with the monthly projection is a
+bank app rather than a manager.
 
 Read fields. **No arithmetic of your own** — including "that's R$ 40 more than
 yesterday", unless both numbers came from a command.

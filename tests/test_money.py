@@ -345,3 +345,45 @@ def test_accents_and_case_do_not_split_a_merchant(mod, con):
     mod.add_tx(con, 3000, "expense", "other", note="FARMACIA SAO JOAO", when=day)
     out = mod.recategorize(con, {"Farmácia São João": "health"})
     assert out["reclassified"] == 1
+
+
+def test_a_single_day_can_be_sourced_without_adding_it_up(mod, con):
+    """The brief's opening sentence had no command behind it.
+
+    It is told to lead with what yesterday cost, and the one rule this agent
+    has forbids it adding the rows itself. With nothing returning a day, it
+    obeyed both and dropped the sentence every morning -- silently, and in a
+    way that looked like a design choice rather than a missing feature.
+    """
+    tz = mod.ZoneInfo("America/Sao_Paulo")
+    y = datetime(2026, 6, 10, 12, 0, tzinfo=tz)
+    mod.add_tx(con, 4000, "expense", "food", note="ALMOCO", when=y)
+    mod.add_tx(con, 2479, "expense", "groceries", note="MERCADO", when=y)
+    mod.add_tx(con, 900000, "income", "other", note="SALARIO", when=y)
+    mod.add_tx(con, 9999, "expense", "food", when=datetime(2026, 6, 11, 12, 0, tzinfo=tz))
+
+    out = mod.day_totals(con, "2026-06-10")
+    assert out["expense"] == 6479          # not the month, not the next day
+    assert out["income"] == 900000
+    assert out["count"] == 3
+    assert out["categories"][0] == {"category": "food", "total": 4000, "n": 1}
+
+
+def test_yesterday_is_the_owners_yesterday_not_the_utc_one(mod, con):
+    """At 21:00 in Sao Paulo it is already tomorrow in UTC.
+
+    Resolved in UTC, "yesterday" becomes today's date and the brief reports a
+    day that has barely started -- most often as R$ 0,00, which reads like a
+    quiet day rather than a bug. It is wrong for a third of every day, and
+    always at the hours someone actually reads a message.
+    """
+    tz = mod.ZoneInfo("America/Sao_Paulo")
+    evening = datetime(2026, 9, 1, 21, 0, tzinfo=tz)
+    assert evening.astimezone(timezone.utc).strftime("%Y-%m-%d") == "2026-09-02"
+
+    assert mod.yesterday_local(con, evening) == "2026-08-31"
+
+
+def test_a_day_with_nothing_on_it_says_zero_rather_than_nothing(mod, con):
+    out = mod.day_totals(con, "2026-06-10")
+    assert out["expense"] == 0 and out["count"] == 0 and out["categories"] == []
