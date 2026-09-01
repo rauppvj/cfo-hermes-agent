@@ -1,66 +1,101 @@
 ---
 name: cfo-setup
-description: Set up a new owner's ledger on first contact — currency, timezone, income and fixed monthly costs — and optionally load three months of sample data so the agent has something to talk about immediately. Use on the very first message from someone whose ledger is empty, when the owner asks to change their currency, timezone, salary or recurring bills, or when they ask for sample data or to clear it.
+description: Walk a new owner through the short setup that makes the rest of the agent work — timezone, currency, what they earn and how often, and their fixed monthly costs — one question at a time, and optionally load three months of sample data. Use on first contact, whenever `money status` reports `ready: false`, when the owner asks to set things up or change their income, salary date, pay frequency, currency or timezone, and when they ask for sample data or to clear it.
 ---
 
-# First run
+# Setting someone up
 
-Someone just texted this agent for the first time. What happens in the next
-two messages decides whether they keep it.
+Until this is done the agent cannot do its job — and it fails in the worst
+possible way. With no income on file, projected income is zero, so *every*
+purchase comes back unaffordable, including a coffee, and the wrong answer
+sounds exactly as confident as a right one.
 
-**Do not interview them.** A form is what every other budgeting app opens
-with, and it is why they are abandoned. Get the two things you cannot work
-around, then let them use it.
+So setup is not paperwork. It is the difference between an agent that works
+and one that lies.
 
-## The two that matter
+## Let the ledger tell you what to ask
+
+```sh
+python3 /opt/data/skills/cfo-shared/scripts/money.py status
+```
+
+`status` returns `ready`, and `next_step` — **the single most useful thing to
+ask for right now**, already worked out. Ask for that one thing, write the
+answer, call `status` again. Repeat until `next_step` is null.
+
+Never assemble your own idea of what is missing, and never ask for something
+`status` did not name. The order exists because each step unblocks the next:
+a timezone that is wrong files spending on the wrong day, and income that is
+missing inverts every verdict.
+
+## One question per message
+
+Two questions in one text is a form, and a form is what every abandoned
+budgeting app opens with. The owner is on a phone.
+
+> Qual cidade você mora? É só pra eu marcar os gastos no dia certo.
+
+> Quanto você recebe, e de quanto em quanto tempo?
+
+> Tem algum gasto fixo todo mês? Aluguel, internet, essas coisas.
+
+After each answer, **confirm what you wrote in one line** and move on. No
+recaps, no progress bars, no "step 2 of 4".
+
+## Writing the answers
 
 ```sh
 S=/opt/data/skills/cfo-shared/scripts
 python3 $S/money.py config timezone America/Sao_Paulo
 python3 $S/money.py config currency BRL
-```
 
-- **Timezone** decides which day — and on the 31st, which *month* — a
-  transaction belongs to. The container's clock is the fleet default and
-  belongs to nobody, so an unset zone silently files late-evening spending on
-  the wrong day. Ask for their city if you cannot infer it.
-- **Currency** is display only; the engine reads both `1.234,56` and
-  `1,234.56` regardless. `BRL` `USD` `EUR` `GBP` are formatted natively.
-
-Anything else can wait. Do not ask for a salary before they have logged
-anything — the first useful exchange is "gastei 40 no almoço" / "anotado".
-
-## Fixed lines, when they come up
-
-Rent, salary, internet — the ones that land every month. Add them as they are
-mentioned rather than collecting them up front:
-
-```sh
+# --every: monthly (default), weekly, biweekly
+python3 $S/money.py fixed add "salário" "7000" --kind income --day 5
+python3 $S/money.py fixed add "freela" "1500" --kind income --every weekly
 python3 $S/money.py fixed add "aluguel" "1.800,00" --kind expense --day 5
-python3 $S/money.py fixed add "salario" "7000" --kind income --day 5
 ```
 
-These are what let `project` and `simulate` mean anything: without them a
-projection is variable spending against no income, and every purchase looks
-unaffordable.
+**Pay frequency is not cosmetic.** Someone paid weekly earns 52 weeks a year,
+not 48 — recording a weekly wage as monthly loses them about a month of
+income in every projection. Ask *how often*, not just how much, and pass
+`--every`. The engine converts to a monthly equivalent itself; never do that
+conversion in your head.
+
+Infer the timezone from the city rather than asking for an IANA name — nobody
+knows they live in `America/Sao_Paulo`. Same for currency: infer it, then
+confirm it in the line where you confirm the city.
+
+## Two ways in, and the owner picks
+
+On first contact, offer both in one message — this is the one time two options
+are better than one question:
+
+> Posso te configurar em uns 30 segundos, ou você já manda um gasto e a gente
+> ajusta no caminho. Como prefere?
+
+If they start logging instead, **let them.** Do not chase the setup. Ask for
+income only when something actually needs it — when `status` says
+`ready: false` and they have asked a question you cannot answer without it.
+That request lands as useful because they already want the answer.
 
 ## Sample data
 
-A ledger with nothing in it cannot answer a question, so someone trying the
-agent out learns nothing from it. Offer the sample once:
+For someone evaluating the agent rather than using it, an empty ledger answers
+nothing:
 
 ```sh
-python3 $S/seed_demo.py            # three months, deterministic
+python3 $S/seed_demo.py            # 3 complete months + the current one to date
 python3 $S/seed_demo.py --reset    # removes ONLY demo rows
 ```
 
-The seed is fixed, so these numbers are the same on every machine. Say plainly
-that it is sample data, and that `--reset` clears it without touching anything
-they logged themselves.
+Offer it once. Say plainly that it is sample data and that `--reset` clears it
+without touching anything they logged. `status` reports `all_data_is_demo`
+when the ledger holds nothing else — check it before describing numbers as
+theirs.
 
 ## Rules
 
-- **Never invent a timezone or currency.** Ask. Getting it wrong is invisible
-  until a month closes wrong.
-- One question per message. Two questions in one text is a form.
-- Confirm what you set, in one line, and then get out of the way.
+- **Never invent a timezone, a currency, an income or a payday.** Ask. Every
+  one of them is invisible when wrong and expensive later.
+- Confirm in one line, then get out of the way.
+- If they decline setup, that is a complete answer. Do not ask twice.

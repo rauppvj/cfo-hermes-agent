@@ -34,7 +34,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DEFAULT_CATEGORIES = [
     "food", "groceries", "transport", "housing", "utilities", "health",
@@ -145,14 +145,26 @@ def init(con: sqlite3.Connection) -> None:
             amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
             kind         TEXT    NOT NULL CHECK (kind IN ('expense','income')),
             day_of_month INTEGER NOT NULL DEFAULT 1,
+            frequency    TEXT    NOT NULL DEFAULT 'monthly'
+                         CHECK (frequency IN ('monthly','weekly','biweekly')),
             active       INTEGER NOT NULL DEFAULT 1
         );
         """
     )
+    # v1 -> v2: recurring lines gained a frequency. A ledger written by v1
+    # holds monthly-only rows, which is exactly the DEFAULT, so the column can
+    # be added in place with no data migration.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(fixed)")}
+    if "frequency" not in cols:
+        con.execute("ALTER TABLE fixed ADD COLUMN frequency TEXT NOT NULL"
+                    " DEFAULT 'monthly'")
+
     con.execute(
         "INSERT OR IGNORE INTO config (key, value) VALUES ('schema_version', ?)",
         (str(SCHEMA_VERSION),),
     )
+    con.execute("UPDATE config SET value = ? WHERE key = 'schema_version'",
+                (str(SCHEMA_VERSION),))
     con.commit()
 
 
@@ -240,13 +252,24 @@ def by_category(con, month: str, kind: str = "expense") -> list[dict]:
     return [{"category": r["category"], "total": int(r["total"]), "n": int(r["n"])} for r in rows]
 
 
+# A month is not four weeks. Paying someone weekly and calling it 4x monthly
+# loses 4.35 weeks a year -- about a month of income missing from every
+# projection. 52/12 and 26/12 are the honest conversions.
+PER_MONTH = {"monthly": 1.0, "weekly": 52 / 12, "biweekly": 26 / 12}
+
+
+def monthly_equivalent(amount_cents: int, frequency: str) -> int:
+    return int(round(amount_cents * PER_MONTH.get(frequency, 1.0)))
+
+
 def fixed_totals(con) -> dict:
+    """Recurring lines, normalised to what they cost or bring in per month."""
     rows = con.execute(
-        "SELECT kind, SUM(amount_cents) AS total FROM fixed WHERE active = 1 GROUP BY kind"
+        "SELECT kind, amount_cents, frequency FROM fixed WHERE active = 1"
     ).fetchall()
     out = {"expense": 0, "income": 0}
     for r in rows:
-        out[r["kind"]] = int(r["total"] or 0)
+        out[r["kind"]] += monthly_equivalent(int(r["amount_cents"]), r["frequency"])
     return out
 
 
@@ -360,6 +383,58 @@ def simulate(con, amount_cents: int, installments: int = 1, today=None) -> dict:
     }
 
 
+def status(con, today=None) -> dict:
+    """Everything the agent needs to orient itself, in one call.
+
+    The model reached for `money status` unprompted on its first live
+    conversation -- which is the strongest evidence there is that the command
+    should exist. It answers "where does this person stand, and what is still
+    missing", so a skill never has to assemble that from three calls and
+    guesswork.
+    """
+    today = today or now_local(con)
+    month = today.strftime("%Y-%m")
+    totals = month_totals(con, month)
+    b = basis(con, today=today)
+    rows = con.execute(
+        "SELECT label, amount_cents, kind, frequency, day_of_month FROM fixed"
+        " WHERE active = 1 ORDER BY kind DESC, day_of_month").fetchall()
+    demo = con.execute(
+        "SELECT COUNT(*) AS n FROM tx WHERE source = 'demo'").fetchone()["n"]
+    total_tx = con.execute("SELECT COUNT(*) AS n FROM tx").fetchone()["n"]
+
+    return {
+        "configured": {
+            "timezone": get_cfg(con, "timezone") or None,
+            "currency": get_cfg(con, "currency") or None,
+        },
+        "month": month,
+        "expense": totals["expense"],
+        "income": totals["income"],
+        "net": totals["net"],
+        "transactions": total_tx,
+        "demo_transactions": demo,
+        "all_data_is_demo": bool(demo) and demo == total_tx,
+        "fixed": [dict(r) for r in rows],
+        "basis": b,
+        "ready": b["usable"] and bool(get_cfg(con, "timezone")),
+        "next_step": _next_step(con, b),
+    }
+
+
+def _next_step(con, b) -> str | None:
+    """The single most useful thing to ask for next, or None when set up."""
+    if not get_cfg(con, "timezone"):
+        return "ask which city they are in, to set the timezone"
+    if not b["has_income"]:
+        return "ask what they earn and how often (monthly, weekly, biweekly)"
+    if not b["has_fixed_costs"]:
+        return "ask for their fixed monthly costs, starting with rent"
+    if b["days_of_history"] < 5:
+        return "nothing to ask -- they just need to log a few days of spending"
+    return None
+
+
 def recent(con, limit: int = 20) -> list[dict]:
     rows = con.execute(
         "SELECT id, day_local, amount_cents, kind, category, note FROM tx"
@@ -409,6 +484,7 @@ def main(argv=None) -> int:
     s.add_argument("--month", default=None, help="YYYY-MM (default: current)")
 
     sub.add_parser("project", help="project this month's close at the current pace")
+    sub.add_parser("status", help="where this person stands and what is missing")
 
     sim = sub.add_parser("simulate", help="what a purchase does to the month")
     sim.add_argument("amount")
@@ -426,7 +502,10 @@ def main(argv=None) -> int:
     fa.add_argument("label")
     fa.add_argument("amount")
     fa.add_argument("--kind", choices=["expense", "income"], default="expense")
-    fa.add_argument("--day", type=int, default=1)
+    fa.add_argument("--day", type=int, default=1,
+                    help="day of month for monthly; for weekly, 1=Monday")
+    fa.add_argument("--every", choices=["monthly", "weekly", "biweekly"],
+                    default="monthly")
     fsub.add_parser("list")
     fr = fsub.add_parser("remove")
     fr.add_argument("id", type=int)
@@ -453,6 +532,9 @@ def main(argv=None) -> int:
         emit({**month_totals(con, month), "categories": by_category(con, month),
               "currency": cur}, cur)
 
+    elif args.cmd == "status":
+        emit({**status(con), "currency": cur}, cur)
+
     elif args.cmd == "project":
         emit({**project_month(con), "currency": cur}, cur)
 
@@ -472,14 +554,18 @@ def main(argv=None) -> int:
         if args.fcmd == "add":
             cents = parse_amount(args.amount)
             c2 = con.execute(
-                "INSERT INTO fixed (label, amount_cents, kind, day_of_month)"
-                " VALUES (?,?,?,?)", (args.label, cents, args.kind, args.day))
+                "INSERT INTO fixed (label, amount_cents, kind, day_of_month,"
+                " frequency) VALUES (?,?,?,?,?)",
+                (args.label, cents, args.kind, args.day, args.every))
             con.commit()
-            emit({"id": c2.lastrowid, "label": args.label, "amount_cents": cents}, cur)
+            emit({"id": c2.lastrowid, "label": args.label,
+                  "amount_cents": cents, "frequency": args.every,
+                  "monthly_equivalent_cents":
+                      monthly_equivalent(cents, args.every)}, cur)
         elif args.fcmd == "list":
             rows = con.execute(
-                "SELECT id, label, amount_cents, kind, day_of_month FROM fixed"
-                " WHERE active = 1 ORDER BY day_of_month").fetchall()
+                "SELECT id, label, amount_cents, kind, day_of_month, frequency"
+                " FROM fixed WHERE active = 1 ORDER BY day_of_month").fetchall()
             emit([dict(r) for r in rows], cur)
         else:
             con.execute("UPDATE fixed SET active = 0 WHERE id = ?", (args.id,))
