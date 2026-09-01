@@ -53,6 +53,15 @@ integer cents, never floats, and each subcommand prints JSON with both the
 raw value and a formatted twin. You can check any answer it gives you by
 running the same command yourself.
 
+The rule has a second half that matters as much: **when the arithmetic is
+standing on too little, the command says so rather than answering anyway.**
+`project` returns a `basis` — how many days of spending it has, whether any
+income is known, how much of the month being projected has actually elapsed —
+and `basis.usable` is false when the answer would be real arithmetic on
+nothing. A month one day old is not a pace: one trip to the shop times thirty
+is a formatted, sourced, meaningless number, and that is the only kind a
+person cannot catch.
+
 ## Try it in one minute
 
 The engine is a plain Python CLI with no dependencies — you can drive the
@@ -67,6 +76,7 @@ python3 cfo-shared/scripts/money.py config timezone America/New_York
 python3 cfo-shared/scripts/money.py config currency USD
 python3 cfo-shared/scripts/seed_demo.py          # 3 months of sample data
 
+python3 cfo-shared/scripts/money.py day             # yesterday, one number
 python3 cfo-shared/scripts/money.py summary
 python3 cfo-shared/scripts/money.py project
 python3 cfo-shared/scripts/money.py simulate "1,200.00" --installments 3
@@ -78,6 +88,41 @@ demo video, plus the current month filled in up to today — because a sample
 whose current month is empty cannot answer the first question anyone asks it.
 Seeded rows are marked `source: demo`, and `seed_demo.py --reset` removes them
 while leaving anything you logged yourself untouched.
+
+## Start from the statement, not from typing
+
+An empty ledger answers nothing, and nobody types ninety days of history into
+a chat. So the way in is the file already sitting in the owner's Downloads:
+`cfo-import` reaches it through Latch and reads it here, and it handles both
+documents people mean by "my statement".
+
+**Bank statements** — CSV, or a PDF where the bank offers no export, in any
+language. The parser is built around what real files do rather than what a
+format says: the year printed once in a section header and never on the rows,
+two date columns where the second leads the description, non-breaking spaces
+inside `R$ 1.800,00`, and every row opening with a transaction type that
+buries the merchant.
+
+**Credit-card invoices** — a fatura is a different document and every
+assumption a statement parser makes about it is wrong. Rows date themselves
+`29 abr` with no year anywhere on the line. A foreign purchase prints three
+numbers and the exchange rate is *last*, so reading the amount at the end of
+the line — correct on a statement, where the last number is the balance —
+imports the rate. And the invoice carries its own settlement of last month,
+unsigned, in the middle of the purchases: counted as spending it nearly
+doubles the month, and it is already on the bank statement as the payment
+leaving the account. It is excluded and named, not silently dropped.
+
+Then the part a keyword rule cannot do. Rules catch the chains and miss
+everything local, which in a real statement is most of it, so `uncategorized`
+returns the **distinct payees** — a hundred and fifty rows come back as forty
+names — and the model classifies them by name, which is the one job here it is
+genuinely better at than code. What it names is **kept**: the map is stored and
+applied to every later import, so the second statement arrives already sorted
+and the owner is asked once rather than every month.
+
+Nothing about the import is arithmetic, which is why the model is allowed near
+it at all. Every total it reports still comes from `money.py`.
 
 ## Deploy it as an agent
 
@@ -123,6 +168,7 @@ agent permanently** — send it from the phone that should own it.
 | [`cfo-simulate`](cfo-simulate/SKILL.md) | what a purchase does to the month, upfront or split |
 | [`cfo-brief`](cfo-brief/SKILL.md) | the 08:00 brief — the only time it speaks first |
 | [`cfo-setup`](cfo-setup/SKILL.md) | first run: timezone, currency, fixed lines, sample data |
+| [`cfo-import`](cfo-import/SKILL.md) | reads a bank statement or card invoice off the owner's Mac |
 
 ## Tests
 
@@ -130,10 +176,17 @@ agent permanently** — send it from the phone that should own it.
 python3 -m pytest tests/ -q
 ```
 
-The ones that earn their place are the boundary tests: an amount read in the
-wrong locale (`R$ 1.234,56` vs `1,234.56`) and a day resolved in the wrong
-zone both fail *silently* — they produce a number, just not the right one, and
-nobody notices until the month closes.
+110 of them, and the ones that earn their place are the boundary tests: an
+amount read in the wrong locale (`R$ 1.234,56` vs `1,234.56`), a day resolved
+in the wrong zone, a merchant name matched inside a longer word (`Raia` in
+`PRAIA GRANDE`), four identical bus fares on one afternoon collapsed into one
+by a deduplicator. Every one of those fails *silently* — it produces a number,
+just not the right one, and nobody notices until the month closes.
+
+A test here is only trusted once it has been run against the code from
+**before** the fix and seen to fail. Two early drafts of one passed against
+malformed fixtures and proved nothing, which is why the assertions pin real
+figures rather than shapes.
 
 ## Currency and locale
 
