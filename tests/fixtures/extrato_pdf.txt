@@ -1,0 +1,123 @@
+BANCO EXEMPLO S.A.
+EXTRATO DE CONTA CORRENTE
+
+Periodo: 01/06/2026 a 31/08/2026
+
+Data       Historico                              Valor        Saldo
+
+02/06/2026   UBER *TRIP                                 -75,61     4.924,39
+02/06/2026   POSTO SHELL                               -117,51     4.806,88
+03/06/2026   IFOOD *RESTAURANTE                        -114,22     4.692,66
+03/06/2026   IFOOD *RESTAURANTE                        -152,21     4.540,45
+04/06/2026   SUPERMERCADO ZAFFARI                      -105,24     4.435,21
+05/06/2026   SALARIO EMPRESA LTDA                     7.000,00    11.435,21
+07/06/2026   POSTO SHELL                               -103,63    11.331,58
+07/06/2026   POSTO SHELL                                -80,06    11.251,52
+08/06/2026   UBER *TRIP                                 -52,99    11.198,53
+08/06/2026   UBER *TRIP                                -157,22    11.041,31
+09/06/2026   POSTO SHELL                               -136,44    10.904,87
+09/06/2026   IFOOD *RESTAURANTE                        -125,00    10.779,87
+10/06/2026   ALUGUEL IMOBILIARIA                     -1.800,00     8.979,87
+12/06/2026   IFOOD *RESTAURANTE                         -64,35     8.915,52
+12/06/2026   IFOOD *RESTAURANTE                        -149,93     8.765,59
+13/06/2026   POSTO SHELL                               -112,44     8.653,15
+14/06/2026   POSTO SHELL                               -132,00     8.521,15
+14/06/2026   POSTO SHELL                                -79,71     8.441,44
+15/06/2026   POSTO SHELL                                -36,97     8.404,47
+15/06/2026   SUPERMERCADO ZAFFARI                       -30,96     8.373,51
+18/06/2026   UBER *TRIP                                 -57,26     8.316,25
+19/06/2026   POSTO SHELL                               -142,62     8.173,63
+19/06/2026   SUPERMERCADO ZAFFARI                       -84,00     8.089,63
+20/06/2026   POSTO SHELL                               -109,04     7.980,59
+20/06/2026   SUPERMERCADO ZAFFARI                      -102,50     7.878,09
+21/06/2026   POSTO SHELL                               -110,72     7.767,37
+21/06/2026   UBER *TRIP                                 -70,17     7.697,20
+22/06/2026   IFOOD *RESTAURANTE                        -155,31     7.541,89
+22/06/2026   SUPERMERCADO ZAFFARI                      -114,25     7.427,64
+23/06/2026   UBER *TRIP                                -129,46     7.298,18
+23/06/2026   SUPERMERCADO ZAFFARI                      -103,76     7.194,42
+24/06/2026   IFOOD *RESTAURANTE                        -131,95     7.062,47
+24/06/2026   UBER *TRIP                                -118,70     6.943,77
+25/06/2026   SUPERMERCADO ZAFFARI                       -61,68     6.882,09
+25/06/2026   IFOOD *RESTAURANTE                         -25,39     6.856,70
+26/06/2026   POSTO SHELL                                -29,50     6.827,20
+27/06/2026   IFOOD *RESTAURANTE                         -82,25     6.744,95
+30/06/2026   POSTO SHELL                               -140,95     6.604,00
+01/07/2026   IFOOD *RESTAURANTE                         -22,24     6.581,76
+02/07/2026   IFOOD *RESTAURANTE                         -76,89     6.504,87
+02/07/2026   SUPERMERCADO ZAFFARI                      -105,25     6.399,62
+03/07/2026   UBER *TRIP                                 -20,90     6.378,72
+04/07/2026   IFOOD *RESTAURANTE                         -27,61     6.351,11
+05/07/2026   SALARIO EMPRESA LTDA                     7.000,00    13.351,11
+06/07/2026   IFOOD *RESTAURANTE                         -47,33    13.303,78
+06/07/2026   POSTO SHELL                                -62,77    13.241,01
+07/07/2026   SUPERMERCADO ZAFFARI                       -40,59    13.200,42
+07/07/2026   IFOOD *RESTAURANTE                        -157,17    13.043,25
+08/07/2026   SUPERMERCADO ZAFFARI                       -74,01    12.969,24
+10/07/2026   ALUGUEL IMOBILIARIA                     -1.800,00    11.169,24
+10/07/2026   POSTO SHELL                                -90,43    11.078,81
+
+BANCO EXEMPLO S.A. - Ouvidoria 0800 000 0000
+Pagina 2
+
+11/07/2026   POSTO SHELL                               -120,49    10.958,32
+11/07/2026   IFOOD *RESTAURANTE                        -116,60    10.841,72
+12/07/2026   SUPERMERCADO ZAFFARI                       -85,64    10.756,08
+12/07/2026   UBER *TRIP                                 -64,33    10.691,75
+13/07/2026   SUPERMERCADO ZAFFARI                      -100,38    10.591,37
+14/07/2026   SUPERMERCADO ZAFFARI                       -16,87    10.574,50
+15/07/2026   SUPERMERCADO ZAFFARI                       -18,28    10.556,22
+16/07/2026   UBER *TRIP                                 -24,84    10.531,38
+17/07/2026   SUPERMERCADO ZAFFARI                       -91,39    10.439,99
+17/07/2026   SUPERMERCADO ZAFFARI                      -126,29    10.313,70
+18/07/2026   SUPERMERCADO ZAFFARI                      -135,91    10.177,79
+19/07/2026   IFOOD *RESTAURANTE                        -111,56    10.066,23
+21/07/2026   IFOOD *RESTAURANTE                         -75,48     9.990,75
+21/07/2026   SUPERMERCADO ZAFFARI                      -117,88     9.872,87
+22/07/2026   SUPERMERCADO ZAFFARI                      -112,10     9.760,77
+23/07/2026   SUPERMERCADO ZAFFARI                       -44,06     9.716,71
+23/07/2026   SUPERMERCADO ZAFFARI                       -45,35     9.671,36
+24/07/2026   SUPERMERCADO ZAFFARI                      -153,25     9.518,11
+25/07/2026   SUPERMERCADO ZAFFARI                       -64,21     9.453,90
+25/07/2026   POSTO SHELL                                -32,18     9.421,72
+27/07/2026   UBER *TRIP                                 -65,79     9.355,93
+27/07/2026   UBER *TRIP                                -122,10     9.233,83
+28/07/2026   UBER *TRIP                                 -68,70     9.165,13
+30/07/2026   POSTO SHELL                               -121,42     9.043,71
+30/07/2026   IFOOD *RESTAURANTE                         -31,68     9.012,03
+31/07/2026   SUPERMERCADO ZAFFARI                       -69,68     8.942,35
+31/07/2026   UBER *TRIP                                 -86,83     8.855,52
+03/08/2026   UBER *TRIP                                -159,98     8.695,54
+04/08/2026   POSTO SHELL                                -59,33     8.636,21
+04/08/2026   UBER *TRIP                                -143,94     8.492,27
+05/08/2026   SALARIO EMPRESA LTDA                     7.000,00    15.492,27
+07/08/2026   UBER *TRIP                                 -66,63    15.425,64
+07/08/2026   UBER *TRIP                                -156,51    15.269,13
+08/08/2026   SUPERMERCADO ZAFFARI                      -147,25    15.121,88
+09/08/2026   IFOOD *RESTAURANTE                        -147,09    14.974,79
+09/08/2026   SUPERMERCADO ZAFFARI                      -111,58    14.863,21
+10/08/2026   ALUGUEL IMOBILIARIA                     -1.800,00    13.063,21
+11/08/2026   SUPERMERCADO ZAFFARI                       -99,93    12.963,28
+12/08/2026   POSTO SHELL                                -71,74    12.891,54
+13/08/2026   POSTO SHELL                                -62,57    12.828,97
+13/08/2026   POSTO SHELL                               -108,11    12.720,86
+14/08/2026   IFOOD *RESTAURANTE                         -82,70    12.638,16
+18/08/2026   POSTO SHELL                               -106,56    12.531,60
+19/08/2026   UBER *TRIP                                 -20,29    12.511,31
+19/08/2026   POSTO SHELL                               -152,08    12.359,23
+
+BANCO EXEMPLO S.A. - Ouvidoria 0800 000 0000
+Pagina 2
+
+20/08/2026   SUPERMERCADO ZAFFARI                      -104,10    12.255,13
+20/08/2026   SUPERMERCADO ZAFFARI                       -52,26    12.202,87
+22/08/2026   SUPERMERCADO ZAFFARI                       -34,66    12.168,21
+22/08/2026   UBER *TRIP                                 -22,38    12.145,83
+24/08/2026   UBER *TRIP                                -159,76    11.986,07
+24/08/2026   POSTO SHELL                               -109,52    11.876,55
+27/08/2026   IFOOD *RESTAURANTE                         -43,15    11.833,40
+28/08/2026   SUPERMERCADO ZAFFARI                       -54,16    11.779,24
+28/08/2026   IFOOD *RESTAURANTE                        -101,01    11.678,23
+29/08/2026   POSTO SHELL                                -23,72    11.654,51
+29/08/2026   IFOOD *RESTAURANTE                         -70,92    11.583,59
+31/08/2026   POSTO SHELL                               -147,96    11.435,63

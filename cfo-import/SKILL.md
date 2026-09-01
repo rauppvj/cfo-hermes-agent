@@ -28,6 +28,37 @@ the Mac:
 Read the file through Latch and write it to `/opt/data/inbox/<filename>`.
 Never point the importer at a path on the Mac; the container cannot see it.
 
+## 1b. If it is a PDF, convert it on the Mac first
+
+**The container has no PDF library and no `pip`** — do not try to install one,
+and do not reach for another skill's OCR script. The Mac is where a PDF
+becomes text, and Latch is how you get there:
+
+    pdftotext -layout statement.pdf /tmp/statement.txt
+
+`-layout` is not optional: without it the columns collapse and the amounts
+stop lining up with their dates.
+
+**Brazilian bank PDFs are usually password-protected, and plenty of banks
+elsewhere do the same.** If the file is locked, ask the owner for the password
+— it is commonly their CPF, a birth date, or the first digits of the account:
+
+    pdftotext -layout -upw <password> statement.pdf /tmp/statement.txt
+
+Ask for it in its own message, use it once, and **never write it anywhere** —
+not into a note, not into the ledger, not into `/opt/data`.
+
+If `pdftotext` is missing on that Mac, say so in one line and offer the two
+ways out, in this order:
+
+  1. **Export CSV or OFX from the bank instead** — every bank offers one, it
+     is cleaner than a PDF, and there is nothing to install. Prefer this.
+  2. `brew install poppler`, if they would rather convert the PDF.
+
+Then copy the `.txt` into `/opt/data/inbox/` and continue below — the importer
+detects a de-PDF'd layout on its own and needs `{"format": "text"}` in the
+mapping.
+
 ## 2. Look at its shape — not at its contents
 
 ```sh
@@ -54,6 +85,9 @@ someone's ledger. The code reads every row from the mapping you give it.
   negative, it is a card statement.
 - `debit` / `credit` instead of `amount` when the file has two columns and no
   minus signs anywhere.
+- `format: "text"` for anything that came from a PDF. `inspect` says
+  `format: text` when it sees a column layout; the amount is the first number
+  on the line and the second is the running balance, which is never imported.
 - `date_format` when the sample is ambiguous. `03/04/2026` is 3 April in
   Brazil and 4 March in the US — **scan the sample for a day above 12** before
   deciding, and ask if nothing settles it.

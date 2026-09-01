@@ -469,9 +469,17 @@ def emit(obj, currency="BRL") -> None:
     print(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse exits with a usage string on stderr and code 2. That string is
+    what reached someone's phone as an answer. Raising instead lets _run turn
+    it into a readable JSON error carrying the valid choices."""
+
+    def error(self, message):
+        raise ValueError(f"{message}. try: {self.prog} --help")
+
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="money", description="the cfo ledger engine")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    p = _Parser(prog="money", description="the cfo ledger engine")
+    sub = p.add_subparsers(dest="cmd", required=True, parser_class=_Parser)
 
     a = sub.add_parser("add", help="record a transaction")
     a.add_argument("amount")
@@ -585,5 +593,39 @@ def main(argv=None) -> int:
     return 0
 
 
+def _run(fn, argv):
+    """Never let a traceback reach a phone.
+
+    Twice now a raw Python traceback has been delivered to the owner as the
+    answer to a question -- once argparse's usage string, once a
+    ModuleNotFoundError from another skill. A SOUL.md rule did not stop it,
+    and it never will: by the time the model sees the text, the damage is a
+    copy-paste away, and the instruction competes with "report errors
+    faithfully", which it should also do.
+
+    So the guarantee moves into the tool. Every failure leaves here as JSON
+    with an `error` the skill can read out in a sentence, and the traceback
+    goes to stderr, where the logs keep it and the chat never sees it.
+    """
+    import traceback
+    try:
+        return fn(argv)
+    except SystemExit as exc:
+        if exc.code in (0, None):
+            raise
+        print(json.dumps({"error": str(exc.code), "ok": False},
+                         ensure_ascii=False))
+        return 1
+    except Exception as exc:                     # noqa: BLE001
+        traceback.print_exc(file=sys.stderr)
+        print(json.dumps({
+            "error": f"{type(exc).__name__}: {exc}",
+            "ok": False,
+            "say": "tell the owner in one sentence what did not work; "
+                   "do not paste this at them",
+        }, ensure_ascii=False))
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_run(main, None))

@@ -125,6 +125,24 @@ def sniff(path: Path) -> dict:
     if not lines:
         raise SystemExit("statement is empty")
 
+    if not looks_like_csv(text):
+        hits = parse_text_lines(text)
+        if not hits:
+            raise SystemExit(
+                "no transaction lines found. If this came from a PDF, convert "
+                "it on the Mac first: pdftotext -layout [-upw PASSWORD] "
+                "file.pdf out.txt")
+        two = sum(1 for h in hits if len(h["amounts"]) > 1)
+        return {
+            "path": str(path), "encoding": encoding, "format": "text",
+            "total_rows": len(hits),
+            "second_amount_is_balance": two > len(hits) / 2,
+            "sample": hits[:SAMPLE_ROWS],
+            "next": ("confirm the mapping: {\"format\":\"text\", \"sign\":...}. "
+                     "Where two amounts are on a line the first is the "
+                     "transaction and the second the running balance."),
+        }
+
     # Some banks put a title block above the header; the header is the first
     # line whose delimiter count matches the lines that follow it.
     delimiter, header_index = ",", 0
@@ -155,6 +173,68 @@ def sniff(path: Path) -> dict:
                  "the description; and whether an expense is a negative amount "
                  "or lives in its own debit column"),
     }
+
+
+# A statement that arrived as a PDF is a RENDERING, not data: by the time it
+# is text, the columns are whitespace and the only reliable landmarks are a
+# date at the start of a line and money at the end. That is what this matches.
+# Everything else on the line -- balances, document numbers, branch codes --
+# is between them.
+# The sign may sit apart from the digits ("-     141,37"): a PDF right-aligns
+# the number inside a column and the minus stays at the column's left edge.
+# It may also trail ("141,37-"), or be a D/C marker, which some banks use
+# instead of a sign at all.
+MONEY = (r"[-+]?\s{0,8}(?:R\$|\$|US\$|€|£)?\s?"
+         r"\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?\s?[-DC]?")
+DATE_TOKEN = r"(?:\d{1,2}[/.\-]\d{1,2}(?:[/.\-]\d{2,4})?|\d{4}-\d{2}-\d{2})"
+TEXT_LINE = re.compile(
+    rf"^\s*(?P<date>{DATE_TOKEN})\s+(?P<rest>\S.*?)\s+"
+    rf"(?P<amounts>(?:{MONEY})(?:\s+{MONEY})?)\s*$")
+
+
+def parse_text_lines(text: str) -> list[dict]:
+    """Transaction-looking lines from a PDF that has been through pdftotext."""
+    out = []
+    for i, line in enumerate(text.splitlines(), start=1):
+        mo = TEXT_LINE.match(line.rstrip())
+        if not mo:
+            continue
+        amounts = re.findall(MONEY, mo.group("amounts"))
+        amounts = [a for a in (a.strip() for a in amounts) if a]
+        if not amounts:
+            continue
+        out.append({"line": i, "date": mo.group("date"),
+                    "description": mo.group("rest").strip(),
+                    "amounts": amounts})
+    return out
+
+
+def looks_like_csv(text: str) -> bool:
+    """Tell a delimited file from a de-PDF'd layout.
+
+    Counting commas does not work, and neither does counting them
+    *consistently*: "-1.800,00   3.200,00" carries two commas on every line of
+    a statement, because money punctuation is the same punctuation and a
+    column layout is regular by definition. Both naive tests call this CSV.
+
+    What actually separates them is the WHITESPACE. A layout aligns columns by
+    padding, so almost every line holds a run of three or more spaces; a CSV
+    delimits with a character and has none. So wide gaps win, and a real
+    delimiter only decides the cases without them.
+    """
+    lines = [l for l in text.splitlines() if l.strip()][:20]
+    if len(lines) < 3:
+        return False
+
+    wide = sum(1 for l in lines if re.search(r"\S {3,}\S", l))
+    if wide >= len(lines) * 0.6:
+        return False
+
+    for d in [";", "\t", "|", ","]:
+        steady = [l.count(d) for l in lines if l.count(d) >= 2]
+        if len(steady) >= len(lines) * 0.7 and len(set(steady)) == 1:
+            return True
+    return False
 
 
 DATE_FORMATS = ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%d.%m.%Y",
@@ -200,6 +280,8 @@ def extract(path: Path, mapping: dict) -> tuple[list[dict], list[dict]]:
          "date_format": "%d/%m/%Y"}                # optional hint
     """
     info = sniff(path)
+    if info.get("format") == "text" or mapping.get("format") == "text":
+        return extract_text(path, mapping)
     text, _ = read_text(path)
     lines = [l for l in text.splitlines() if l.strip()]
     body = "\n".join(lines[info["header_line"] - 1:])
@@ -249,6 +331,50 @@ def extract(path: Path, mapping: dict) -> tuple[list[dict], list[dict]]:
         except (ValueError, KeyError) as exc:
             rejected.append({"line": i, "reason": str(exc),
                              "raw": {k: v for k, v in list(raw.items())[:4]}})
+    return rows, rejected
+
+
+def normalise_sign(raw: str) -> str:
+    """Bring a detached, trailing or lettered sign back onto the number."""
+    s = raw.strip()
+    negative = False
+    if s.endswith(("-", "D")):        # "141,37-" / "141,37 D" (debito)
+        negative, s = s[-1] == "-" or s[-1] == "D", s[:-1].strip()
+    elif s.endswith("C"):             # credito
+        s = s[:-1].strip()
+    if s.startswith(("-", "+")):
+        negative = negative or s[0] == "-"
+        s = s[1:].strip()
+    return ("-" if negative else "") + s
+
+
+def extract_text(path: Path, mapping: dict) -> tuple[list[dict], list[dict]]:
+    """The same normalised rows, from a de-PDF'd statement."""
+    text, _ = read_text(path)
+    sign = mapping.get("sign", "negative_is_expense")
+    date_format = mapping.get("date_format")
+    rows, rejected = [], []
+
+    for hit in parse_text_lines(text):
+        try:
+            cents = m.parse_amount(normalise_sign(hit["amounts"][0]))
+            kind = "expense" if (
+                (cents < 0) == (sign == "negative_is_expense")) else "income"
+            cents = abs(cents)
+            if cents == 0:
+                continue
+            day = parse_date(hit["date"], date_format)
+            description = hit["description"]
+            rows.append({
+                "day": day, "amount_cents": cents, "kind": kind,
+                "description": description,
+                "category": categorize(description),
+                "hash": row_hash(day, cents if kind == "expense" else -cents,
+                                 description),
+            })
+        except ValueError as exc:
+            rejected.append({"line": hit["line"], "reason": str(exc),
+                             "raw": hit["description"][:40]})
     return rows, rejected
 
 
@@ -424,10 +550,18 @@ def detect_recurring(con, min_occurrences: int = 3) -> dict:
 # CLI
 # --------------------------------------------------------------------------
 
+class _Parser(argparse.ArgumentParser):
+    """argparse exits with a usage string on stderr and code 2. That string is
+    what reached someone's phone as an answer. Raising instead lets _run turn
+    it into a readable JSON error carrying the valid choices."""
+
+    def error(self, message):
+        raise ValueError(f"{message}. try: {self.prog} --help")
+
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(
+    p = _Parser(
         prog="statement", description="import a bank or card statement")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd", required=True, parser_class=_Parser)
 
     i = sub.add_parser("inspect", help="headers and a sample, to build a mapping")
     i.add_argument("file")
@@ -465,5 +599,39 @@ def main(argv=None) -> int:
     return 0
 
 
+def _run(fn, argv):
+    """Never let a traceback reach a phone.
+
+    Twice now a raw Python traceback has been delivered to the owner as the
+    answer to a question -- once argparse's usage string, once a
+    ModuleNotFoundError from another skill. A SOUL.md rule did not stop it,
+    and it never will: by the time the model sees the text, the damage is a
+    copy-paste away, and the instruction competes with "report errors
+    faithfully", which it should also do.
+
+    So the guarantee moves into the tool. Every failure leaves here as JSON
+    with an `error` the skill can read out in a sentence, and the traceback
+    goes to stderr, where the logs keep it and the chat never sees it.
+    """
+    import traceback
+    try:
+        return fn(argv)
+    except SystemExit as exc:
+        if exc.code in (0, None):
+            raise
+        print(json.dumps({"error": str(exc.code), "ok": False},
+                         ensure_ascii=False))
+        return 1
+    except Exception as exc:                     # noqa: BLE001
+        traceback.print_exc(file=sys.stderr)
+        print(json.dumps({
+            "error": f"{type(exc).__name__}: {exc}",
+            "ok": False,
+            "say": "tell the owner in one sentence what did not work; "
+                   "do not paste this at them",
+        }, ensure_ascii=False))
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_run(main, None))

@@ -186,3 +186,88 @@ def test_categories_work_in_both_languages(st, description, category):
 def test_accents_do_not_break_matching(st):
     assert st.categorize("FARMÁCIA SÃO JOÃO") == "health"
     assert st.categorize("CAFÉ DA ESQUINA") == "food"
+
+
+# -- statements that arrived as a PDF --------------------------------------
+
+PDF = FIXTURES / "extrato_pdf.txt"
+PDF_MAP = {"format": "text", "sign": "negative_is_expense",
+           "date_format": "%d/%m/%Y"}
+
+
+def test_a_layout_is_not_mistaken_for_a_csv(st):
+    """The trap this cost an evening: '-1.800,00   3.200,00' holds two commas
+    on every line of a statement, so both 'count the commas' and 'count them
+    consistently' call a de-PDF'd layout a CSV, and it imports as nonsense."""
+    assert st.looks_like_csv(BR.read_text(encoding="latin-1")) is True
+    assert st.looks_like_csv(US.read_text()) is True
+    assert st.looks_like_csv(PDF.read_text()) is False
+
+
+def test_all_three_formats_are_detected_without_being_told(st):
+    assert st.sniff(BR).get("format") is None      # csv
+    assert st.sniff(US).get("format") is None      # csv
+    assert st.sniff(PDF)["format"] == "text"
+
+
+def test_pdf_text_import_reads_amounts_and_direction(st, con):
+    out = st.apply(con, PDF, PDF_MAP, dry_run=False)
+    assert out["imported"] > 100
+    assert out["unreadable"] == 0
+    assert out["expense"] > 0 and out["income"] > 0
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("-1.800,00", "-1.800,00"),
+    ("1.800,00-", "-1.800,00"),      # trailing minus
+    ("-    141,37", "-141,37"),      # sign left at the column edge
+    ("141,37 D", "-141,37"),         # debit marker instead of a sign
+    ("141,37 C", "141,37"),          # credit marker
+    ("7.000,00", "7.000,00"),
+])
+def test_every_way_a_bank_writes_a_minus(st, raw, expected):
+    """A PDF right-aligns the digits and leaves the sign at the column edge,
+    and plenty of banks use a D/C marker instead of a sign at all. Reading
+    any of these as positive turns an expense into income."""
+    assert st.normalise_sign(raw).replace(" ", "") == expected
+
+
+def test_the_balance_column_is_not_imported_as_a_transaction(st, con):
+    """Each line carries the amount AND the running balance. Taking the
+    second number would import the balance as spending."""
+    rows, _ = st.extract(PDF, PDF_MAP)
+    salary = [r for r in rows if "SALARIO" in r["description"]][0]
+    assert salary["amount_cents"] == 700000     # not the balance beside it
+
+
+def test_page_furniture_is_skipped(st, con):
+    """The fixture repeats a bank header and 'Pagina 2' every 40 days."""
+    rows, rejected = st.extract(PDF, PDF_MAP)
+    assert not any("Ouvidoria" in r["description"] for r in rows)
+    assert not any("Pagina" in r["description"] for r in rows)
+    assert rejected == []
+
+
+def test_detect_works_the_same_on_a_pdf_derived_statement(st, con):
+    st.apply(con, PDF, PDF_MAP, dry_run=False)
+    found = st.detect_recurring(con)
+    assert found["income_candidates"][0]["amount_cents"] == 700000
+    assert found["income_candidates"][0]["frequency"] == "monthly"
+
+
+# -- errors never reach a phone --------------------------------------------
+
+def test_a_missing_file_is_json_not_a_traceback(st, capsys):
+    rc = st._run(st.main, ["inspect", "/nope/missing.csv"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    payload = json.loads(out)
+    assert payload["ok"] is False and "error" in payload
+
+
+def test_an_unknown_subcommand_is_json_not_a_usage_string(st, capsys):
+    """This exact case was delivered to someone's phone as the answer."""
+    rc = st._run(st.main, ["inspekt", "x"])
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 1 and payload["ok"] is False
+    assert "invalid choice" in payload["error"]
