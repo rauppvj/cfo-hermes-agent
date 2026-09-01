@@ -184,8 +184,9 @@ Classify them from the name and write them back in one call:
 python3 .../money.py recategorize --map '{"SUPERMERCADO ANGELONI":"groceries","POSTO IPIRANGA":"transport"}'
 ```
 
-- Match on a distinctive fragment of the name; it is matched case-insensitively
-  against the whole description.
+- Match on a distinctive fragment of the name — accents and case are folded,
+  and it matches **whole words** anywhere in the description. `Raia` finds
+  "DROGA RAIA FILIAL 2116" and does *not* find "PRAIA GRANDE ESTACIONAMENTO".
 - **Leave anything genuinely unclear as `other`.** A confident wrong category
   is worse than an honest unknown, because it disappears into a total nobody
   questions.
@@ -193,6 +194,23 @@ python3 .../money.py recategorize --map '{"SUPERMERCADO ANGELONI":"groceries","P
   settling spending already recorded elsewhere. Leave it as `other` and say so
   if the owner asks why their biggest line is not a category.
 - Then run `uncategorized` again and tell the owner what is left.
+
+**What you name here is kept.** The map is stored, not just applied, and every
+later import is classified through it before the keyword rules run — so the
+second statement arrives already sorted and you do not ask the owner about the
+same shops twice. That makes each name worth spending a moment on.
+
+```sh
+python3 .../money.py merchants                  # what is already known
+python3 .../money.py merchants --forget "Sesc"  # if the owner corrects one
+```
+
+A name the owner corrects is just written again with the new category —
+`recategorize` overwrites, and the more specific name wins over the general
+one ("Posto Ipiranga" is decided before "Posto"). Correcting the *stored*
+name does not move transactions already filed; if the owner wants those moved
+too, they are `other` no longer, so say what you changed and leave the history
+alone unless they ask.
 
 ### Also record who they are
 

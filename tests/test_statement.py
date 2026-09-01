@@ -449,3 +449,73 @@ def test_money_moved_between_your_own_accounts_is_not_income(st, con):
     assert after["primary_payer"]["label"].startswith("PAGADOR")
     assert before["suggested_expected_income_cents"] == 350000
     assert after["suggested_expected_income_cents"] > 800000
+
+
+def test_the_second_import_does_not_ask_what_the_first_already_answered(st, con, tmp_path):
+    """The whole reason the map is stored.
+
+    Ninety days go in, the model names the forty merchants no keyword rule
+    could hold, and the owner answers. Next month the same shops appear under
+    slightly different notes -- a branch number, a city, a longer legal name.
+    If the naming lived only in the rows imported the first time, every one of
+    them is `other` again and the agent asks the same questions. Nothing
+    fails; the answer is just worth less each month.
+    """
+    import money as m
+
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=m.ZoneInfo("America/Sao_Paulo"))
+    m.add_tx(con, 6000, "expense", "other", note="JERONIMO", when=day)
+    m.add_tx(con, 8990, "expense", "other", note="DROGA RAIA", when=day)
+    m.recategorize(con, {"Jeronimo": "food", "Raia": "health"})
+
+    later = tmp_path / "setembro.csv"
+    later.write_text(
+        "Data,Historico,Valor\n"
+        "05/09/2026,JERONIMO BURGER HOUSE 04,-70.00\n"
+        "06/09/2026,DROGA RAIA FILIAL 2116 FLORIANOPOLIS,-45.00\n"
+        "07/09/2026,PRAIA GRANDE ESTACIONAMENTO,-25.00\n",
+        encoding="utf-8")
+
+    out = st.apply(con, later, BR_MAP, dry_run=True)
+    got = {r["description"]: r["category"] for r in out["sample"]}
+
+    assert got["JERONIMO BURGER HOUSE 04"] == "food"
+    assert got["DROGA RAIA FILIAL 2116 FLORIANOPOLIS"] == "health"
+    # and the near-miss stays out of it: parking is not a pharmacy
+    assert got["PRAIA GRANDE ESTACIONAMENTO"] == "transport"
+
+
+def test_a_learned_name_outranks_a_keyword_rule(st, con, tmp_path):
+    """The rules are a guess about everyone; the map is a decision about this
+    owner. The `bar ` keyword files a bar under food -- but this owner's Bar
+    do Ze is where he watches football, and he has said so once already."""
+    import money as m
+
+    m.learn_merchant(con, "Bar do Ze", "leisure")
+    con.commit()
+
+    f = tmp_path / "out.csv"
+    f.write_text("Data,Historico,Valor\n"
+                 "05/09/2026,BAR DO ZE LTDA,-30.00\n"
+                 "06/09/2026,BAR DO JOAO,-20.00\n"
+                 "07/09/2026,SUPERMERCADO ANGELONI,-150.00\n",
+                 encoding="utf-8")
+
+    out = st.apply(con, f, BR_MAP, dry_run=True)
+    got = {r["description"]: r["category"] for r in out["sample"]}
+
+    assert got["BAR DO ZE LTDA"] == "leisure"     # named by the owner
+    assert got["BAR DO JOAO"] == "food"           # still the generic rule
+
+
+def test_an_empty_map_changes_no_answer_the_rules_gave(st, con):
+    """A v2 ledger opens as v3 with nothing learned, and has to classify
+    exactly as it did before -- the migration adds a table, not a behaviour.
+    Pinned against `categorize` itself, so this cannot drift quietly."""
+    import money as m
+    assert m.learned_categories(con) == []
+
+    rows, _ = st.extract(BR, BR_MAP)
+    out = st.apply(con, BR, BR_MAP, dry_run=True)
+    assert out["to_import"] == len(rows)
+    assert all(r["category"] == st.categorize(r["description"]) for r in rows)

@@ -31,11 +31,12 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DEFAULT_CATEGORIES = [
     "food", "groceries", "transport", "housing", "utilities", "health",
@@ -140,6 +141,12 @@ def init(con: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS tx_month ON tx (month_local);
         CREATE INDEX IF NOT EXISTS tx_day   ON tx (day_local);
+        CREATE TABLE IF NOT EXISTS merchant_category (
+            merchant    TEXT PRIMARY KEY,
+            label       TEXT NOT NULL,
+            category    TEXT NOT NULL,
+            updated_utc TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS fixed (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             label        TEXT    NOT NULL,
@@ -159,6 +166,10 @@ def init(con: sqlite3.Connection) -> None:
     if "frequency" not in cols:
         con.execute("ALTER TABLE fixed ADD COLUMN frequency TEXT NOT NULL"
                     " DEFAULT 'monthly'")
+
+    # v2 -> v3: learned merchant names. A new table with no back-reference, so
+    # CREATE TABLE IF NOT EXISTS above is the whole migration -- a v2 ledger
+    # opens as v3 with an empty map and classifies exactly as it did before.
 
     con.execute(
         "INSERT OR IGNORE INTO config (key, value) VALUES ('schema_version', ?)",
@@ -454,6 +465,71 @@ def _next_step(con, b) -> str | None:
     return None
 
 
+# --------------------------------------------------------------------------
+# merchants: naming a shop is classification, and it has to outlive the month
+# --------------------------------------------------------------------------
+
+def strip_accents(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s or "")
+                   if unicodedata.category(c) != "Mn")
+
+
+def merchant_tokens(s: str) -> list[str]:
+    """A name reduced to comparable words: accents off, case off, punctuation
+    gone. `Droga Raia*` and `DROGARIA  RAIA` both become plain word lists."""
+    return re.findall(r"[0-9a-z]+", strip_accents(s).lower())
+
+
+def merchant_matches(merchant: str, note: str) -> bool:
+    """Whole words, in order -- never a bare substring.
+
+    `LIKE '%raia%'` also matches "PRAIA GRANDE ESTACIONAMENTO". Map the
+    pharmacy and a parking lot silently becomes health spending, filed wrong
+    for good, while the reclassified count reads like success -- the failure
+    every bug in this ledger has had in common. Short merchant names are the
+    normal case in a real statement (Raia, Duda, Sesc, Ipiranga), so the match
+    has to respect word edges.
+    """
+    want = merchant_tokens(merchant)
+    if not want:
+        return False
+    have = merchant_tokens(note)
+    n = len(want)
+    return any(have[i:i + n] == want for i in range(len(have) - n + 1))
+
+
+def learn_merchant(con, merchant: str, category: str) -> str:
+    """Remember one merchant->category decision. Returns the stored key."""
+    key = " ".join(merchant_tokens(merchant))
+    con.execute(
+        "INSERT INTO merchant_category (merchant, label, category, updated_utc)"
+        " VALUES (?,?,?,?) ON CONFLICT(merchant) DO UPDATE SET"
+        " label = excluded.label, category = excluded.category,"
+        " updated_utc = excluded.updated_utc",
+        (key, merchant.strip(), category,
+         datetime.now(timezone.utc).isoformat(timespec="seconds")))
+    return key
+
+
+def learned_categories(con) -> list[tuple[str, str]]:
+    """Every merchant already named, longest name first.
+
+    Longest first so the specific beats the general: once both are known,
+    "posto ipiranga" is decided before "posto".
+    """
+    rows = con.execute(
+        "SELECT merchant, category FROM merchant_category").fetchall()
+    return sorted(((r["merchant"], r["category"]) for r in rows),
+                  key=lambda mc: -len(merchant_tokens(mc[0])))
+
+
+def categorize_learned(note: str, learned: list[tuple[str, str]]) -> str | None:
+    for merchant, category in learned:
+        if merchant_matches(merchant, note):
+            return category
+    return None
+
+
 def uncategorized(con, limit: int = 40) -> dict:
     """The merchants the rules could not place, worst first.
 
@@ -486,26 +562,55 @@ def uncategorized(con, limit: int = 40) -> dict:
         "categories": DEFAULT_CATEGORIES,
         "next": ("classify these by name and write them back with "
                  "`recategorize --map '{\"MERCHANT\": \"category\"}'`; "
-                 "leave anything genuinely unclear as other"),
+                 "leave anything genuinely unclear as other. What you name "
+                 "here is remembered and applied to future imports, so it is "
+                 "asked once, not every month"),
     }
 
 
 def recategorize(con, mapping: dict) -> dict:
-    """Apply a merchant->category map to every matching transaction."""
+    """Apply a merchant->category map to matching rows, and remember it.
+
+    Remembering is the point. Naming forty merchants no keyword rule could
+    hold is real work, and if it lands only on the rows that happen to be in
+    the ledger today, next month's statement arrives as forty unknowns again
+    and the owner is asked the same questions twice. The map is the asset;
+    the UPDATE is just its first application.
+    """
     changed = 0
+    learned = 0
     unknown = []
+    skipped = []
+
+    rows = con.execute(
+        "SELECT id, note FROM tx WHERE category = 'other' AND kind = 'expense'"
+    ).fetchall()
+    done: set[int] = set()
+
     for merchant, category in mapping.items():
         if category not in DEFAULT_CATEGORIES:
             unknown.append(category)
             continue
-        cur = con.execute(
-            "UPDATE tx SET category = ? WHERE category = 'other'"
-            " AND kind = 'expense' AND lower(note) LIKE ?",
-            (category, f"%{merchant.lower()}%"))
-        changed += cur.rowcount
+        if not merchant_tokens(merchant):
+            skipped.append(merchant)  # punctuation only: matches everything
+            continue
+
+        hits = [r["id"] for r in rows
+                if r["id"] not in done and merchant_matches(merchant, r["note"])]
+        if hits:
+            con.executemany("UPDATE tx SET category = ? WHERE id = ?",
+                            [(category, i) for i in hits])
+            done.update(hits)
+            changed += len(hits)
+
+        learn_merchant(con, merchant, category)
+        learned += 1
+
     con.commit()
-    return {"reclassified": changed, "rejected_categories": unknown,
-            "still_other": uncategorized(con)["distinct"]}
+    return {"reclassified": changed, "learned": learned,
+            "rejected_categories": unknown, "unusable_names": skipped,
+            "still_other": uncategorized(con)["distinct"],
+            "note": "these names are remembered and applied to future imports"}
 
 
 def recent(con, limit: int = 20) -> list[dict]:
@@ -572,6 +677,10 @@ def main(argv=None) -> int:
     rc = sub.add_parser("recategorize", help="apply a merchant->category map")
     rc.add_argument("--map", required=True, help="JSON, or @path to a file")
 
+    mc = sub.add_parser("merchants", help="merchant names already learned")
+    mc.add_argument("--forget", default=None,
+                    help="drop one learned name, so the rules decide it again")
+
     sim = sub.add_parser("simulate", help="what a purchase does to the month")
     sim.add_argument("amount")
     sim.add_argument("--installments", type=int, default=1)
@@ -629,6 +738,19 @@ def main(argv=None) -> int:
         payload = json.loads(Path(raw[1:]).expanduser().read_text()
                              if raw.startswith("@") else raw)
         emit(recategorize(con, payload), cur)
+
+    elif args.cmd == "merchants":
+        if args.forget:
+            gone = con.execute(
+                "DELETE FROM merchant_category WHERE merchant = ?",
+                (" ".join(merchant_tokens(args.forget)),)).rowcount
+            con.commit()
+            emit({"forgot": args.forget, "removed": gone}, cur)
+        else:
+            rows = con.execute(
+                "SELECT label, category, updated_utc FROM merchant_category"
+                " ORDER BY category, label").fetchall()
+            emit({"merchants": [dict(r) for r in rows], "count": len(rows)}, cur)
 
     elif args.cmd == "project":
         emit({**project_month(con), "currency": cur}, cur)

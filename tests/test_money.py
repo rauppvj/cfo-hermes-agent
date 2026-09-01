@@ -238,3 +238,110 @@ def test_recategorize_never_touches_what_was_already_placed(mod, con):
     mod.add_tx(con, 4000, "expense", "groceries", note="MERCADO X", when=day)
     mod.recategorize(con, {"MERCADO X": "leisure"})
     assert mod.by_category(con, "2026-06")[0]["category"] == "groceries"
+
+
+def test_recategorize_does_not_match_inside_a_longer_word(mod, con):
+    """`LIKE '%raia%'` also matches PRAIA -- the parking lot becomes a
+    pharmacy.
+
+    This is the silent kind. The call returns `reclassified: 2` and reads like
+    it worked; the money is simply filed under health from then on, and a
+    summary showing health up by R$ 25,00 gives no hint why. Short merchant
+    names are the normal case in a real statement, so the collision is not
+    exotic -- Raia is a chain the model classified on the owner's first
+    import, and praia is in half the addresses on a Santa Catarina statement.
+    """
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 8990, "expense", "other", note="DROGA RAIA", when=day)
+    mod.add_tx(con, 2500, "expense", "other",
+               note="PRAIA GRANDE ESTACIONAMENTO", when=day)
+
+    out = mod.recategorize(con, {"Raia": "health"})
+
+    assert out["reclassified"] == 1
+    by_cat = {c["category"]: c["total"] for c in mod.by_category(con, "2026-06")}
+    assert by_cat["health"] == 8990       # the pharmacy, and only the pharmacy
+    assert by_cat["other"] == 2500        # the parking lot, still honest
+
+
+def test_recategorize_matches_a_name_split_across_words(mod, con):
+    """The case the stricter matcher must not break, which is the common one.
+
+    The map is written from the deduplicated payee, and that is rarely the
+    whole note -- the note carries a transaction type, a branch, a city and a
+    hash around it. Substring matching got this right; whole-word matching
+    has to keep getting it right, or the fix above trades one silent wrong
+    number for another.
+    """
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 4500, "expense", "other",
+               note="Saida PIX AUTOPISTA LITORAL SUL S.A. #ab12", when=day)
+
+    out = mod.recategorize(con, {"Autopista Litoral Sul": "transport"})
+    assert out["reclassified"] == 1
+
+
+def test_a_name_once_classified_is_not_asked_again(mod, con):
+    """The forty names the model places are the asset, not the UPDATE.
+
+    If the decision lives only in the rows present today, next month's
+    statement arrives as the same forty unknowns and the owner watches the
+    agent ask questions it already asked. Nothing errors -- the work is just
+    silently thrown away every month.
+    """
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 6000, "expense", "other", note="JERONIMO", when=day)
+
+    out = mod.recategorize(con, {"Jeronimo": "food"})
+    assert out["learned"] == 1
+
+    learned = mod.learned_categories(con)
+    assert mod.categorize_learned("JERONIMO BURGER HOUSE 04", learned) == "food"
+    assert mod.categorize_learned("PADARIA DO ZE", learned) is None
+
+
+def test_a_more_specific_name_wins_over_a_general_one(mod, con):
+    """Both are true of the same note, so the order is the whole answer: a
+    posto is transport, but this owner's Posto Ipiranga sells his groceries."""
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 1000, "expense", "other", note="POSTO IPIRANGA 42", when=day)
+    mod.recategorize(con, {"Posto": "transport"})
+    mod.recategorize(con, {"Posto Ipiranga": "groceries"})
+
+    learned = mod.learned_categories(con)
+    assert mod.categorize_learned("POSTO IPIRANGA 42", learned) == "groceries"
+    assert mod.categorize_learned("POSTO SHELL BR101", learned) == "transport"
+
+
+def test_a_learned_name_can_be_corrected_and_forgotten(mod, con):
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 4000, "expense", "other", note="SESC FLORIPA", when=day)
+
+    mod.recategorize(con, {"Sesc": "leisure"})
+    mod.recategorize(con, {"SESC": "education"})    # same name, folded the same
+    rows = con.execute("SELECT merchant, category FROM merchant_category").fetchall()
+    assert len(rows) == 1 and rows[0]["category"] == "education"
+
+    con.execute("DELETE FROM merchant_category WHERE merchant = ?",
+                (" ".join(mod.merchant_tokens("sesc")),))
+    assert mod.learned_categories(con) == []
+
+
+def test_a_name_of_pure_punctuation_matches_nothing(mod, con):
+    """It folds to zero words, and a zero-word name is contained in every
+    note -- the whole ledger would land in one category."""
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 4000, "expense", "other", note="MERCADO X", when=day)
+    mod.add_tx(con, 7000, "expense", "other", note="POSTO Y", when=day)
+
+    out = mod.recategorize(con, {"--": "leisure"})
+    assert out["reclassified"] == 0
+    assert out["unusable_names"] == ["--"]
+    assert mod.uncategorized(con)["distinct"] == 2
+
+
+def test_accents_and_case_do_not_split_a_merchant(mod, con):
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 3000, "expense", "other", note="FARMACIA SAO JOAO", when=day)
+    out = mod.recategorize(con, {"Farmácia São João": "health"})
+    assert out["reclassified"] == 1

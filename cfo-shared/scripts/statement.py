@@ -39,7 +39,6 @@ import json
 import os
 import re
 import sys
-import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -87,9 +86,10 @@ RULES = [
 ]
 
 
-def strip_accents(s: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFD", s)
-                   if unicodedata.category(c) != "Mn")
+# One definition, in money.py, because the importer and the merchant matcher
+# have to fold a name the same way or a merchant learned from a statement
+# stops matching the statement it came from.
+strip_accents = m.strip_accents
 
 
 def categorize(description: str) -> str:
@@ -536,6 +536,16 @@ def apply(con, path: Path, mapping: dict, dry_run: bool = True,
     rows, rejected = extract(path, mapping, password)
     if not rows:
         raise SystemExit("no readable transactions -- check the mapping")
+
+    # What the owner's agent has already named beats the generic keyword rules
+    # -- those are a guess about everyone, this is a decision about this
+    # person's own statement. It is also why the second import asks nothing.
+    learned = m.learned_categories(con)
+    if learned:
+        for r in rows:
+            hit = m.categorize_learned(r["description"], learned)
+            if hit:
+                r["category"] = hit
 
     seen = existing_hashes(con)
     fresh, duplicates = [], 0
