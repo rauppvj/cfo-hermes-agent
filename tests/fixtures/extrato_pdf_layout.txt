@@ -1,0 +1,44 @@
+Extrato exportado no dia 31 de agosto de 2026 as 22:40
+NOME DE EXEMPLO • 000.000.000-00
+Agencia: 1 • Conta: 12345678
+Extrato
+Periodo • 1 de junho de 2026 ate 31 de agosto de 2026
+
+Junho 2026 ( 01/06/2026 - 30/06/2026 ) Entradas: R$ 9.100,00 • Saidas: R$ 5.240,00
+Data
+lancamento
+Data
+contabil Tipo Descricao Valor
+05/06 05/06 Entrada PIX Pix recebido de PAGADOR EXEMPLO LTDA R$ 8.900,00
+06/06 06/06 Pagamento IMOBILIARIA EXEMPLO LTDA -R$ 1.800,00
+08/06 08/06 Pagamento SEGURADORA EXEMPLO S.A. -R$ 189,90
+10/06 10/06 Saida PIX Pix enviado para ENERGIA EXEMPLO S.A -R$ 212,45
+12/06 14/06 Debito de Cartao SUPERMERCADO EXEMPLO -R$ 342,10
+18/06 18/06 Debito de Cartao IFOOD *RESTAURANTE -R$ 64,30
+22/06 22/06 Saida PIX Pix enviado para POSTO EXEMPLO -R$ 180,00
+
+Julho 2026 ( 01/07/2026 - 31/07/2026 ) Entradas: R$ 9.100,00 • Saidas: R$ 5.240,00
+Data
+lancamento
+Data
+contabil Tipo Descricao Valor
+05/07 05/07 Entrada PIX Pix recebido de PAGADOR EXEMPLO LTDA R$ 9.400,00
+06/07 06/07 Pagamento IMOBILIARIA EXEMPLO LTDA -R$ 1.800,00
+08/07 08/07 Pagamento SEGURADORA EXEMPLO S.A. -R$ 189,90
+10/07 10/07 Saida PIX Pix enviado para ENERGIA EXEMPLO S.A -R$ 212,45
+12/07 14/07 Debito de Cartao SUPERMERCADO EXEMPLO -R$ 342,10
+18/07 18/07 Debito de Cartao IFOOD *RESTAURANTE -R$ 64,30
+22/07 22/07 Saida PIX Pix enviado para POSTO EXEMPLO -R$ 180,00
+
+Agosto 2026 ( 01/08/2026 - 31/08/2026 ) Entradas: R$ 9.100,00 • Saidas: R$ 5.240,00
+Data
+lancamento
+Data
+contabil Tipo Descricao Valor
+05/08 05/08 Entrada PIX Pix recebido de PAGADOR EXEMPLO LTDA R$ 6.200,00
+06/08 06/08 Pagamento IMOBILIARIA EXEMPLO LTDA -R$ 1.800,00
+08/08 08/08 Pagamento SEGURADORA EXEMPLO S.A. -R$ 189,90
+10/08 10/08 Saida PIX Pix enviado para ENERGIA EXEMPLO S.A -R$ 212,45
+12/08 14/08 Debito de Cartao SUPERMERCADO EXEMPLO -R$ 342,10
+18/08 18/08 Debito de Cartao IFOOD *RESTAURANTE -R$ 64,30
+22/08 22/08 Saida PIX Pix enviado para POSTO EXEMPLO -R$ 180,00

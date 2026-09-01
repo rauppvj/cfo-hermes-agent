@@ -262,6 +262,18 @@ def monthly_equivalent(amount_cents: int, frequency: str) -> int:
     return int(round(amount_cents * PER_MONTH.get(frequency, 1.0)))
 
 
+def expected_income(con) -> int:
+    """What this person typically earns in a month, when no fixed salary
+    exists. Freelance, contract and commission income is the normal case for
+    a lot of people, and a projection that demands a fixed salary tells all
+    of them they are broke."""
+    raw = get_cfg(con, "expected_income")
+    try:
+        return int(raw) if raw else 0
+    except ValueError:
+        return 0
+
+
 def fixed_totals(con) -> dict:
     """Recurring lines, normalised to what they cost or bring in per month."""
     rows = con.execute(
@@ -294,7 +306,7 @@ def basis(con, today=None) -> dict:
     ).fetchone()["d"] or 0
     fx = fixed_totals(con)
     month_income = month_totals(con, today.strftime("%Y-%m"))["income"]
-    has_income = (fx["income"] + month_income) > 0
+    has_income = (fx["income"] + month_income + expected_income(con)) > 0
 
     reasons = []
     if days < 5:
@@ -332,7 +344,12 @@ def project_month(con, today=None) -> dict:
     daily = variable / elapsed if elapsed else 0
     projected_variable = int(round(daily * total_days))
     projected_expense = projected_variable + fx["expense"]
-    projected_income = totals["income"] + fx["income"]
+    # Income booked this month, plus any fixed line, or -- for someone
+    # without a fixed salary -- their declared typical month, whichever is
+    # larger. Early in a month a freelancer has often booked nothing yet, and
+    # projecting zero income makes every purchase unaffordable.
+    projected_income = max(totals["income"] + fx["income"],
+                           expected_income(con))
 
     return {
         "month": month,
@@ -427,7 +444,8 @@ def _next_step(con, b) -> str | None:
     if not get_cfg(con, "timezone"):
         return "ask which city they are in, to set the timezone"
     if not b["has_income"]:
-        return "ask what they earn and how often (monthly, weekly, biweekly)"
+        return ("ask what they earn and how often -- and if it varies, set a "
+                "typical month with `config expected_income`")
     if not b["has_fixed_costs"]:
         return "ask for their fixed monthly costs, starting with rent"
     if b["days_of_history"] < 5:

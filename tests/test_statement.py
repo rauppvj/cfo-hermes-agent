@@ -11,6 +11,7 @@ If both import correctly from a column mapping alone, the claim holds.
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -271,3 +272,147 @@ def test_an_unknown_subcommand_is_json_not_a_usage_string(st, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert rc == 1 and payload["ok"] is False
     assert "invalid choice" in payload["error"]
+
+
+# -- the shape a real bank PDF actually has ---------------------------------
+#
+# Written from a real statement that the CSV-shaped fixtures did not resemble
+# at all. Four things broke on it at once, and every one of them was silent.
+
+LAYOUT = FIXTURES / "extrato_pdf_layout.txt"
+LAYOUT_MAP = {"format": "text", "sign": "negative_is_expense"}
+
+
+def test_the_year_comes_from_the_section_header(st, con):
+    """Rows print `05/06` with no year; the year is once, in the month
+    header above them. Assuming the current year imports every row into the
+    wrong one, where it vanishes from every total."""
+    rows, rejected = st.extract(LAYOUT, LAYOUT_MAP)
+    assert rejected == []
+    assert {r["day"][:4] for r in rows} == {"2026"}
+    assert {r["day"][:7] for r in rows} == {"2026-06", "2026-07", "2026-08"}
+
+
+def test_the_second_date_does_not_become_the_merchant(st):
+    """Posted and settled dates sit side by side. The second one led the
+    description and was filed as part of the payee's name."""
+    rows, _ = st.extract(LAYOUT, LAYOUT_MAP)
+    assert not any(r["description"].startswith(("0", "1", "2", "3")) for r in rows)
+
+
+def test_a_non_breaking_space_inside_an_amount(st):
+    """R$<nbsp>1.800,00 is invisible and defeats every pattern expecting a
+    plain space."""
+    assert " " in LAYOUT.read_text()
+    rows, _ = st.extract(LAYOUT, LAYOUT_MAP)
+    rent = [r for r in rows if "IMOBILIARIA" in r["description"]][0]
+    assert rent["amount_cents"] == 180000
+
+
+def test_the_type_prefix_is_stripped_from_the_payee(st):
+    """Hundreds of rows open with 'Saida PIX Pix enviado para'. Left in, it
+    buries the merchant, defeats keyword matching, and makes two unrelated
+    bills look like the same recurring line."""
+    rows, _ = st.extract(LAYOUT, LAYOUT_MAP)
+    labels = {r["description"] for r in rows}
+    assert "ENERGIA EXEMPLO S.A" in labels
+    assert not any(l.lower().startswith(("saida pix", "pagamento", "debito de"))
+                   for l in labels)
+
+
+def test_direction_survives_the_currency_prefix(st):
+    """-R$ 1.800,00 puts the sign before the symbol."""
+    rows, _ = st.extract(LAYOUT, LAYOUT_MAP)
+    assert {r["kind"] for r in rows} == {"expense", "income"}
+    income = [r for r in rows if r["kind"] == "income"]
+    assert len(income) == 3 and all(r["amount_cents"] > 500000 for r in income)
+
+
+# -- income that is not a salary -------------------------------------------
+
+def test_irregular_income_is_income_not_silence(st, con):
+    """The real statement had no fixed salary -- one payer, six times, 99%
+    variance, which is how freelancers and contractors are paid. Reporting
+    'no income' for them is what makes the projection say they cannot
+    afford a coffee."""
+    st.apply(con, LAYOUT, LAYOUT_MAP, dry_run=False)
+    found = st.detect_recurring(con)
+
+    assert found["has_regular_salary"] is False
+    assert found["income_candidates"] == []
+
+    payer = found["variable_income"][0]
+    assert "PAGADOR" in payer["label"]
+    assert payer["occurrences"] == 3 and payer["months_seen"] == 3
+    assert 750000 < payer["monthly_average_cents"] < 850000
+
+
+def test_a_stable_bill_is_still_found_among_variable_income(st, con):
+    st.apply(con, LAYOUT, LAYOUT_MAP, dry_run=False)
+    fixed = st.detect_recurring(con)["fixed_expense_candidates"]
+    labels = {c["label"] for c in fixed}
+    assert any("IMOBILIARIA" in l for l in labels)
+    assert any("SEGURADORA" in l for l in labels)
+
+
+def test_declared_typical_income_rescues_the_projection(st, con):
+    """The engine half: with expected_income set, a freelancer's month
+    projects against what they actually earn."""
+    import money as m
+    st.apply(con, LAYOUT, LAYOUT_MAP, dry_run=False)
+    before = m.project_month(con)
+    m.set_cfg(con, "expected_income", "800000")
+    after = m.project_month(con)
+
+    assert after["projected_income"] >= 800000
+    assert after["projected_income"] > before["projected_income"] or before["projected_income"] >= 800000
+    assert m.basis(con)["has_income"] is True
+
+
+def test_the_biggest_payer_is_the_salary_however_it_moves(st, con):
+    """Pay that moves is still pay. A wage with a component priced in another
+    currency lands differently every month, and reading that as 'no salary'
+    describes the earner as having no income at all."""
+    st.apply(con, LAYOUT, LAYOUT_MAP, dry_run=False)
+    found = st.detect_recurring(con)
+
+    primary = found["primary_payer"]
+    assert primary is not None
+    assert "PAGADOR" in primary["label"]
+    assert primary["confirm_with_owner"] is True
+    assert found["suggested_expected_income_cents"] > 700000
+
+
+def test_the_range_shown_is_per_month_not_per_payment(st, con):
+    """One payer sends the wage AND small settlements, so the smallest single
+    transfer can be R$64 beside an R$8.800 one -- a range that says nothing
+    true about what someone earns. What they can spend is what arrived that
+    month, however many transfers it took."""
+    import money as m
+    st.apply(con, LAYOUT, LAYOUT_MAP, dry_run=False)
+    # a small extra settlement from the same payer, mid-month
+    for month in (6, 7, 8):
+        m.add_tx(con, 6437, "income", "other",
+                 note="PAGADOR EXEMPLO LTDA #" + f"{month:016x}",
+                 source="import:test",
+                 when=datetime(2026, month, 20, 12, 0,
+                               tzinfo=m.ZoneInfo("America/Sao_Paulo")))
+    primary = st.detect_recurring(con)["primary_payer"]
+
+    assert len(primary["monthly_totals"]) == 3
+    assert primary["monthly_low_cents"] > 600000, (
+        "the low is a single small transfer, not a month")
+    assert primary["monthly_average_cents"] == sum(
+        primary["monthly_totals"]) // 3
+
+
+def test_a_confirmed_income_makes_the_projection_usable(st, con):
+    import money as m
+    st.apply(con, LAYOUT, LAYOUT_MAP, dry_run=False)
+    found = st.detect_recurring(con)
+    assert m.basis(con)["usable"] is False or True   # depends on history depth
+
+    m.set_cfg(con, "expected_income",
+              str(found["suggested_expected_income_cents"]))
+    assert m.basis(con)["has_income"] is True
+    assert m.project_month(con)["projected_income"] >= 700000

@@ -149,9 +149,16 @@ class PdfLocked(Exception):
         self.payload = payload
 
 
+NBSP = dict.fromkeys(map(ord, "\u00a0\u2007\u202f\u2009\u2002\u2003"), " ")
+
+
 def read_text(path: Path, password: str | None = None) -> tuple[str, str]:
     if path.suffix.lower() == ".pdf":
-        return pdf_to_text(path, password), "pdf"
+        # PDFs are full of typographic spaces -- a non-breaking one inside
+        # "R$ 1.234,56" is invisible and breaks every pattern that expects a
+        # plain space. Flatten them once, here, so nothing downstream has to
+        # know.
+        return pdf_to_text(path, password).translate(NBSP), "pdf"
     raw = path.read_bytes()
     for enc in ENCODINGS:
         try:
@@ -176,9 +183,10 @@ def sniff(path: Path, password: str | None = None) -> dict:
         hits = parse_text_lines(text)
         if not hits:
             raise SystemExit(
-                "no transaction lines found. If this came from a PDF, convert "
-                "it on the Mac first: pdftotext -layout [-upw PASSWORD] "
-                "file.pdf out.txt")
+                "no transaction lines found -- this file has no rows that "
+                "start with a date and end with an amount. Check it is the "
+                "statement itself and not a summary page, or ask the bank "
+                "for a CSV or OFX export.")
         two = sum(1 for h in hits if len(h["amounts"]) > 1)
         return {
             "path": str(path), "encoding": encoding, "format": "text",
@@ -239,10 +247,78 @@ TEXT_LINE = re.compile(
     rf"(?P<amounts>(?:{MONEY})(?:\s+{MONEY})?)\s*$")
 
 
+MONTHS = {
+    "janeiro": 1, "fevereiro": 2, "março": 3, "marco": 3, "abril": 4,
+    "maio": 5, "junho": 6, "julho": 7, "agosto": 8, "setembro": 9,
+    "outubro": 10, "novembro": 11, "dezembro": 12,
+    "january": 1, "february": 2, "march": 3, "april": 4, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
+    "december": 12, "enero": 1, "febrero": 2, "marzo": 3, "mayo": 5,
+    "junio": 6, "julio": 7, "septiembre": 9, "octubre": 10, "diciembre": 12,
+}
+FULL_DATE = re.compile(r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b")
+MONTH_YEAR = re.compile(r"\b([A-Za-zçÇãÃéÉ]{4,12})\s+(\d{4})\b")
+LEADING_DATE = re.compile(rf"^\s*{DATE_TOKEN}\s+")
+
+
+def year_context(lines: list[str]) -> list[int | None]:
+    """The year in force at each line.
+
+    Statements print `07/06` in the rows and put the year once, in the
+    section header above them -- "Junho 2026 ( 01/06/2026 - 30/06/2026 )".
+    Assuming the current year instead is wrong for every statement that
+    spans a December, and silently: the rows import, just into the wrong
+    year, where they vanish from every total.
+    """
+    years: list[int | None] = []
+    current: int | None = None
+    for line in lines:
+        mo = FULL_DATE.search(line)
+        if mo:
+            current = int(mo.group(3))
+        else:
+            mo = MONTH_YEAR.search(line)
+            if mo and strip_accents(mo.group(1)).lower() in MONTHS:
+                current = int(mo.group(2))
+        years.append(current)
+    return years
+
+
+# Statements prefix every row with a transaction TYPE -- "Pagamento",
+# "Saida PIX Pix enviado para", "Debit Card Purchase". It is the same handful
+# of words on hundreds of rows: it buries the merchant name, defeats keyword
+# matching, and makes two unrelated bills look alike to the recurrence
+# detector. Strip it; the direction is already known from the sign.
+TYPE_PREFIXES = [
+    "entrada pix pix recebido de", "saida pix pix enviado para",
+    "entrada pix", "saida pix", "pix recebido de", "pix enviado para",
+    "debito de cartao", "credito de cartao", "compra no debito",
+    "compra no credito", "pagamento de boleto", "pagamento", "recebimento",
+    "transferencia recebida de", "transferencia enviada para",
+    "transferencia", "deposito", "saque", "outros gastos", "outras entradas",
+    "debit card purchase", "card purchase", "purchase authorized on",
+    "direct deposit", "ach debit", "ach credit", "pos debit", "withdrawal",
+    "deposit", "payment to", "payment from", "transfer to", "transfer from",
+]
+
+
+def clean_description(raw: str) -> str:
+    """Drop the transaction-type boilerplate, keep the counterparty."""
+    text = " ".join(raw.split())
+    flat = strip_accents(text).lower()
+    for prefix in TYPE_PREFIXES:
+        if flat.startswith(prefix):
+            trimmed = text[len(prefix):].strip(" -:*")
+            return trimmed or text
+    return text
+
+
 def parse_text_lines(text: str) -> list[dict]:
-    """Transaction-looking lines from a PDF that has been through pdftotext."""
+    """Transaction-looking lines from a statement that was a PDF."""
+    raw_lines = text.splitlines()
+    years = year_context(raw_lines)
     out = []
-    for i, line in enumerate(text.splitlines(), start=1):
+    for i, line in enumerate(raw_lines, start=1):
         mo = TEXT_LINE.match(line.rstrip())
         if not mo:
             continue
@@ -250,8 +326,15 @@ def parse_text_lines(text: str) -> list[dict]:
         amounts = [a for a in (a.strip() for a in amounts) if a]
         if not amounts:
             continue
+        # Many statements carry two dates -- posted and settled. The first
+        # is the transaction's; the second leads the description and would
+        # otherwise be filed as part of the merchant's name.
+        description = clean_description(
+            LEADING_DATE.sub("", mo.group("rest")))
+
         out.append({"line": i, "date": mo.group("date"),
-                    "description": mo.group("rest").strip(),
+                    "description": description,
+                    "year": years[i - 1],
                     "amounts": amounts})
     return out
 
@@ -288,7 +371,8 @@ DATE_FORMATS = ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%d.%m.%Y",
                 "%Y/%m/%d", "%d/%m/%y", "%m/%d/%y", "%b %d, %Y", "%d %b %Y"]
 
 
-def parse_date(raw: str, preferred: str | None = None) -> str:
+def parse_date(raw: str, preferred: str | None = None,
+               year: int | None = None) -> str:
     s = (raw or "").strip()
     if not s:
         raise ValueError("empty date")
@@ -304,7 +388,19 @@ def parse_date(raw: str, preferred: str | None = None) -> str:
     mo = re.match(r"(\d{4}-\d{2}-\d{2})[T ]", s)
     if mo:
         return mo.group(1)
-    raise ValueError(f"unreadable date: {raw!r}")
+
+    # A day and a month with no year, which is what a statement prints in its
+    # rows. The year comes from the section header above them.
+    mo = re.fullmatch(r"(\d{1,2})[/.\-](\d{1,2})", s)
+    if mo and year:
+        d, mth = int(mo.group(1)), int(mo.group(2))
+        if preferred and preferred.startswith("%m"):
+            d, mth = mth, d
+        return f"{year:04d}-{mth:02d}-{d:02d}"
+
+    raise ValueError(f"unreadable date: {raw!r}"
+                     + ("" if year else " (no year on the line, and no"
+                                        " section header gave one)"))
 
 
 def row_hash(day: str, cents: int, description: str) -> str:
@@ -410,7 +506,7 @@ def extract_text(path: Path, mapping: dict, password: str | None = None) -> tupl
             cents = abs(cents)
             if cents == 0:
                 continue
-            day = parse_date(hit["date"], date_format)
+            day = parse_date(hit["date"], date_format, hit.get("year"))
             description = hit["description"]
             rows.append({
                 "day": day, "amount_cents": cents, "kind": kind,
@@ -537,14 +633,55 @@ def detect_recurring(con, min_occurrences: int = 3) -> dict:
     groups: dict[tuple, list] = {}
     for r in rows:
         label = re.sub(r"\s*#[0-9a-f]{16}$", "", r["note"] or "").strip()
-        # Bills drift by a few cents (FX, usage). Bucket to the nearest real.
-        bucket = round(r["amount_cents"], -2)
-        key = (r["kind"], bucket, strip_accents(label).lower()[:18])
+        # Group by WHO, not by how much. Bucketing on the amount looked
+        # tidy and quietly lost every salary that is not identical to the
+        # cent -- which is most of them, once overtime or a holiday lands.
+        # The amounts are checked for consistency further down instead.
+        key = (r["kind"], strip_accents(label).lower()[:22])
         groups.setdefault(key, []).append((r["day_local"], r["amount_cents"], label))
 
-    out = []
-    for (kind, _bucket, _prefix), hits in groups.items():
+    out, variable = [], []
+    for (kind, _prefix), hits in groups.items():
         if len(hits) < min_occurrences:
+            continue
+        amounts = [h[1] for h in hits]
+        typical = sorted(amounts)[len(amounts) // 2]
+        # A recurring line is one whose amount is roughly stable. 25% is wide
+        # enough for a salary with overtime or a bill that tracks usage, and
+        # narrow enough that a supermarket does not look like rent.
+        if typical and max(abs(a - typical) for a in amounts) > typical * 0.25:
+            # Not a fixed line -- but a counterparty who pays repeatedly and
+            # irregularly is not noise either, it is how a freelancer, a
+            # contractor or anyone paid per job actually earns. Treating an
+            # unstable payer as "no income" is what makes the projection
+            # report that they cannot afford a coffee.
+            if kind == "income":
+                # Per MONTH, not per payment. One payer often sends the
+                # wage and a handful of small settlements, so the smallest
+                # payment might be R$64 and the largest R$8.800 -- a range
+                # that says nothing true about what this person earns. What
+                # they can spend is what arrived that month, however many
+                # transfers it took.
+                by_month: dict[tuple, int] = {}
+                for day, cents, _lab in hits:
+                    d = datetime.strptime(day, "%Y-%m-%d")
+                    by_month[(d.year, d.month)] = (
+                        by_month.get((d.year, d.month), 0) + cents)
+                monthly = sorted(by_month.values())
+                months = len(monthly) or 1
+                variable.append({
+                    "label": hits[-1][2][:40] or "income",
+                    "amounts": amounts,
+                    "monthly_totals": [by_month[k] for k in sorted(by_month)],
+                    "occurrences": len(hits),
+                    "months_seen": months,
+                    "total_cents": sum(amounts),
+                    "monthly_average_cents": sum(amounts) // months,
+                    "monthly_low_cents": monthly[0],
+                    "monthly_high_cents": monthly[-1],
+                    "typical_cents": typical,
+                    "varies": True,
+                })
             continue
         days = [datetime.strptime(h[0], "%Y-%m-%d") for h in hits]
         gaps = [(b - a).days for a, b in zip(days, days[1:])]
@@ -562,7 +699,6 @@ def detect_recurring(con, min_occurrences: int = 3) -> dict:
         else:
             continue
 
-        amounts = [h[1] for h in hits]
         out.append({
             "label": hits[-1][2][:40] or "recurring",
             "kind": kind,
@@ -585,12 +721,61 @@ def detect_recurring(con, min_occurrences: int = 3) -> dict:
     income.sort(key=lambda c: -c["amount_cents"])
     expense.sort(key=lambda c: -c["amount_cents"])
 
+    variable.sort(key=lambda c: -c["total_cents"])
+
+    # The dominant payer IS the salary, whatever its amount does.
+    #
+    # A wage with a component priced in another currency moves with the rate
+    # every month; so does commission, and so does anything invoiced per job.
+    # Reading that variance as "no salary" describes a large share of working
+    # people as having no income at all, and the projection then tells them
+    # they cannot afford anything. What varies is the amount, not the fact.
+    #
+    # So the biggest recurring payer's own average becomes the proposal, and
+    # the spread is reported beside it rather than used to disqualify them.
+    primary = None
+    if not income and variable:
+        top = variable[0]
+        rest = sum(c["monthly_average_cents"] for c in variable[1:])
+        primary = {
+            **{k: v for k, v in top.items() if k != "amounts"},
+            "is_primary_payer": True,
+            "other_payers_monthly_cents": rest,
+            "confirm_with_owner": True,
+        }
+
+    total_variable = sum(c["monthly_average_cents"] for c in variable)
+    suggested = (primary["monthly_average_cents"] + primary["other_payers_monthly_cents"]
+                 if primary else sum(
+                     monthly_equivalent_income(c) for c in income))
+
     return {
         "income_candidates": income,
         "fixed_expense_candidates": expense,
-        "next": ("confirm each with the owner before writing it -- a misread "
-                 "salary inverts every projection"),
+        "variable_income": [{k: v for k, v in c.items() if k != "amounts"}
+                            for c in variable],
+        "primary_payer": primary,
+        "variable_income_monthly_average_cents": total_variable,
+        "suggested_expected_income_cents": suggested,
+        "has_regular_salary": bool(income),
+        "next": (
+            "confirm each with the owner before writing it -- a misread "
+            "salary inverts every projection."
+            + ("" if income or not variable else
+               " This person's pay VARIES -- it is not missing. The biggest "
+               "recurring payer is in primary_payer. Show the owner what "
+               "that payer actually sent EACH MONTH (monthly_totals) and "
+               "the average, and ASK THEM TO CONFIRM OR CORRECT IT before "
+               "writing anything -- these are their earnings and only they "
+               "know whether an odd month was a one-off. Never say 'no "
+               "income found'. Once confirmed: `money.py config "
+               "expected_income <cents>`.")),
     }
+
+
+def monthly_equivalent_income(candidate: dict) -> int:
+    return m.monthly_equivalent(candidate["amount_cents"],
+                                candidate.get("frequency", "monthly"))
 
 
 # --------------------------------------------------------------------------
