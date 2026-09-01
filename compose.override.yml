@@ -37,4 +37,5 @@ services:
       - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-simulate:/opt/data/skills/cfo-simulate:ro
       - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-brief:/opt/data/skills/cfo-brief:ro
       - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-setup:/opt/data/skills/cfo-setup:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-import:/opt/data/skills/cfo-import:ro
       - ${AGENT_DIR:?set by agent-mgr from the registry}/runtime/SOUL.md:/opt/data/SOUL.md:ro
