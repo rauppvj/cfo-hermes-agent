@@ -1,0 +1,40 @@
+# Extra mounts for this agent. agent-mgr's template makes exactly one -- this
+# agent's home -- and names this file as where an instance adds its own.
+#
+# The skills are mounted, not fetched: nobody else owns them, so `git pull` is
+# the update and `git rev-parse HEAD` is the version.
+#
+# ${AGENT_DIR}, never "./". agent-mgr passes its own templates/compose.yml as
+# the FIRST -f, and Compose resolves relative bind paths against THAT file's
+# directory -- so "./" here would mount agent-mgr's templates instead of this
+# repo. AGENT_DIR comes from the registry row, is absolute, and is per-row, so
+# a second person's checkout mounts their own.
+#
+# FLAT, one line per skill, each landing directly under /opt/data/skills. Two
+# quiet mistakes are available here:
+#
+#   - Mounting one directory AT /opt/data/skills. That is where
+#     `agent-mgr deploy` installs the fleet skills (google-workspace,
+#     plow-invite), so a mount over it shadows them silently.
+#   - Nesting these under a subdirectory. Every SKILL.md here names the
+#     absolute path /opt/data/skills/cfo-shared/scripts/money.py, so the
+#     bundles only resolve as siblings directly under /opt/data/skills.
+#
+# Read-only: the agent runs these, it does not edit them. The ledger it DOES
+# write lives in the home bind at /opt/data, which is the whole point of the
+# repo carrying no data.
+#
+# The last line is different in kind: this repo's SOUL.md as a single-FILE :ro
+# bind over the gateway's own /opt/data/SOUL.md (HERMES_HOME is /opt/data). It
+# carries the no-arithmetic rule, and pinning it read-only is what keeps a turn
+# from editing that rule away.
+services:
+  hermes:
+    volumes:
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-shared:/opt/data/skills/cfo-shared:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-log:/opt/data/skills/cfo-log:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-ask:/opt/data/skills/cfo-ask:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-simulate:/opt/data/skills/cfo-simulate:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-brief:/opt/data/skills/cfo-brief:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-setup:/opt/data/skills/cfo-setup:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/runtime/SOUL.md:/opt/data/SOUL.md:ro
