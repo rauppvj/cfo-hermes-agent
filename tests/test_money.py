@@ -156,3 +156,38 @@ def test_simulation_reports_when_it_does_not_fit(mod, con):
 def test_simulate_rejects_zero_instalments(mod, con):
     with pytest.raises(ValueError):
         mod.simulate(con, 1000, installments=0)
+
+
+# -- basis: the projection's own honesty ------------------------------------
+
+def test_basis_flags_an_empty_ledger_as_unusable(mod, con):
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 4000, "expense", "food", when=day)
+    b = mod.project_month(con, today=day)["basis"]
+    assert b["usable"] is False
+    assert any("income" in r for r in b["reasons"])
+
+
+def test_simulate_carries_basis_so_a_verdict_can_be_withheld(mod, con):
+    """With no income on file, projected income is zero and EVERYTHING is
+    unaffordable -- including a coffee. The verdict is meaningless, and the
+    caller has to be able to see that without inferring it."""
+    day = datetime(2026, 6, 10, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    mod.add_tx(con, 500, "expense", "food", when=day)
+    s = mod.simulate(con, 300, today=day)          # R$3,00
+    assert s["fits_this_month"] is False           # absurd on its face
+    assert s["basis"]["usable"] is False           # and the data says why
+
+
+def test_basis_becomes_usable_once_the_month_is_furnished(mod, con):
+    day = datetime(2026, 6, 20, 12, 0, tzinfo=mod.ZoneInfo("America/Sao_Paulo"))
+    for d in range(1, 15):
+        mod.add_tx(con, 3000, "expense", "food",
+                   when=day.replace(day=d))
+    con.execute("INSERT INTO fixed (label, amount_cents, kind, day_of_month)"
+                " VALUES ('salary', 700000, 'income', 5)")
+    con.execute("INSERT INTO fixed (label, amount_cents, kind, day_of_month)"
+                " VALUES ('rent', 180000, 'expense', 5)")
+    con.commit()
+    b = mod.project_month(con, today=day)["basis"]
+    assert b["usable"] is True and b["reasons"] == []

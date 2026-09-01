@@ -255,6 +255,41 @@ def days_in_month(day: datetime) -> int:
     return (nxt - timedelta(days=1)).day
 
 
+def basis(con, today=None) -> dict:
+    """How much history the projection is standing on.
+
+    A projection from four days and no salary is arithmetic on almost
+    nothing, and it always says the same thing: you cannot afford it. Left to
+    a `_fmt` string the model has no way to tell that apart from a real
+    verdict -- so the thinness is a FIELD, not something the skill has to
+    notice. `usable` is what a caller keys off; the reasons say what to ask
+    for.
+    """
+    today = today or now_local(con)
+    days = con.execute(
+        "SELECT COUNT(DISTINCT day_local) AS d FROM tx WHERE kind = 'expense'"
+    ).fetchone()["d"] or 0
+    fx = fixed_totals(con)
+    month_income = month_totals(con, today.strftime("%Y-%m"))["income"]
+    has_income = (fx["income"] + month_income) > 0
+
+    reasons = []
+    if days < 5:
+        reasons.append("fewer than 5 days of recorded spending")
+    if not has_income:
+        reasons.append("no income recorded -- add a salary with `fixed add`")
+    if not fx["expense"]:
+        reasons.append("no fixed costs recorded, so the projection omits rent and bills")
+
+    return {
+        "days_of_history": days,
+        "has_income": has_income,
+        "has_fixed_costs": bool(fx["expense"]),
+        "usable": not reasons,
+        "reasons": reasons,
+    }
+
+
 def project_month(con, today=None) -> dict:
     """Project this month's close from the pace so far.
 
@@ -289,6 +324,7 @@ def project_month(con, today=None) -> dict:
         "projected_expense": projected_expense,
         "projected_income": projected_income,
         "projected_net": projected_income - projected_expense,
+        "basis": basis(con, today=today),
     }
 
 
@@ -320,6 +356,7 @@ def simulate(con, amount_cents: int, installments: int = 1, today=None) -> dict:
         "projected_net_after": after_net,
         "fits_this_month": after_net >= 0,
         "swing": base["projected_net"] - after_net,
+        "basis": base["basis"],
     }
 
 

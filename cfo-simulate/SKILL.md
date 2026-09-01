@@ -16,7 +16,25 @@ python3 /opt/data/skills/cfo-shared/scripts/money.py simulate "<amount>" \
 
 Returns the month's projection with and without the purchase:
 `projected_net_before`, `projected_net_after`, `fits_this_month`, `swing`,
-`per_installment`, `first_installment` — each with a `_fmt` twin.
+`per_installment`, `first_installment` — each with a `_fmt` twin — plus
+`basis`.
+
+## Read `basis` before you read the verdict
+
+`basis.usable` is false when the ledger cannot support a projection yet: too
+few days, no income recorded, no fixed costs. **When it is false,
+`fits_this_month` is meaningless** — with no salary on file, projected income
+is zero and *everything* comes back as unaffordable, including a coffee.
+
+So when `basis.usable` is false, do not deliver a verdict. Say what is
+missing, in one line, and ask for the one thing that would fix it:
+
+> Ainda não consigo responder direito: você não tem renda registrada, então
+> qualquer compra aparece como inviável. Me diz quanto você recebe por mês e
+> quando, que eu já respondo.
+
+`basis.reasons` lists what is missing. Lead with the income one — it is the
+gap that inverts the answer.
 
 **Every number you say is one of those fields.** You do not work out what is
 left over, you do not divide the price yourself, and you do not judge
@@ -47,5 +65,6 @@ Rules for the words:
   decision is theirs. A tool that says "you shouldn't buy this" gets deleted.
 - **A purchase is not recorded.** Simulating is asking, not spending. If they
   then say they bought it, that is `cfo-log`.
-- When the ledger is too thin for a projection (a few days, no fixed lines),
-  say that instead of producing a confident verdict from almost no data.
+- **Never deliver a verdict over `basis.usable: false`.** A confident "não
+  cabe" built on an empty ledger is the fastest way to lose someone's trust,
+  because it is wrong and sounds certain.
