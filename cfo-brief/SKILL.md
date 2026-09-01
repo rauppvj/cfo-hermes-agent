@@ -34,7 +34,13 @@ Three sentences at most, in this order, and drop any that has nothing to say:
 
 1. **What yesterday cost.** One number.
 2. **Where the month lands at this pace**, and how that sits against the
-   fixed lines and income.
+   fixed lines and income — **only if `project` returns `basis.usable: true`.**
+   In the first days of a month it is false, because a pace divided by one or
+   two days is a purchase multiplied by thirty. Then say the month is too
+   young to read and give what is solid instead: what is already spent, and
+   what fixed lines are due. Never state a projected close over
+   `basis.usable: false`; the figure is real arithmetic on too little, which
+   is the one kind of wrong number nobody can spot.
 3. **The one thing worth a decision today** — a bill that lands this week, a
    category that has already passed last month's total, a projection that
    turned negative. If nothing qualifies, say nothing; do not manufacture an
@@ -42,6 +48,12 @@ Three sentences at most, in this order, and drop any that has nothing to say:
 
 > Bom dia. Ontem R$ 87,00. No ritmo atual setembro fecha em R$ 3.240,00,
 > R$ 400,00 acima do previsto. Alimentação já passou o mês inteiro de agosto.
+
+And on the 1st, when there is no pace to read yet:
+
+> Bom dia. Ontem R$ 86,79. Setembro mal começou, então ainda não dá para
+> falar em ritmo — o que está certo é R$ 2.480,00 de contas fixas, a primeira
+> no dia 6.
 
 ## Rules
 

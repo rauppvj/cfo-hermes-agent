@@ -387,3 +387,50 @@ def test_yesterday_is_the_owners_yesterday_not_the_utc_one(mod, con):
 def test_a_day_with_nothing_on_it_says_zero_rather_than_nothing(mod, con):
     out = mod.day_totals(con, "2026-06-10")
     assert out["expense"] == 0 and out["count"] == 0 and out["categories"] == []
+
+
+def test_a_month_barely_begun_is_not_a_pace(mod, con):
+    """49 days of history and a projection standing on one of them.
+
+    The two thinness guards measure different things and come apart at
+    exactly the wrong moment. `days_of_history` counts the whole ledger, so
+    an imported year of statements makes it large and `usable` true -- while
+    the projection divides this month's spend by the day of the month. On the
+    1st that is a single purchase multiplied by thirty. One trip to the shop
+    for R$ 70,32 projected R$ 2.109,60 of variable spending, and the brief
+    that ran before it, with nothing logged yet, announced the month closing
+    at exactly the fixed costs. Every figure sourced, formatted, and
+    meaningless.
+    """
+    tz = mod.ZoneInfo("America/Sao_Paulo")
+    for d in range(1, 26):                       # a month of real history
+        mod.add_tx(con, 5000, "expense", "food",
+                   when=datetime(2026, 8, d, 12, 0, tzinfo=tz))
+    con.execute("INSERT INTO fixed (label, amount_cents, kind, day_of_month)"
+                " VALUES ('rent', 312749, 'expense', 6)")
+    con.commit()
+
+    first = datetime(2026, 9, 1, 14, 44, tzinfo=tz)
+    mod.add_tx(con, 7032, "expense", "groceries", when=first)
+
+    p = mod.project_month(con, today=first)
+    assert p["projected_variable"] == 210960      # the number to distrust
+    assert p["basis"]["days_of_history"] == 26    # ledger looks rich
+    assert p["basis"]["elapsed_days"] == 1        # the month does not
+    assert p["basis"]["usable"] is False
+    assert "2026-09" in p["basis"]["reasons"][0]
+
+
+def test_the_guard_lifts_once_the_month_has_days_behind_it(mod, con):
+    tz = mod.ZoneInfo("America/Sao_Paulo")
+    for d in range(1, 6):
+        mod.add_tx(con, 5000, "expense", "food",
+                   when=datetime(2026, 9, d, 12, 0, tzinfo=tz))
+    con.execute("INSERT INTO fixed (label, amount_cents, kind, day_of_month)"
+                " VALUES ('rent', 100000, 'expense', 6)")
+    con.execute("INSERT INTO fixed (label, amount_cents, kind, day_of_month)"
+                " VALUES ('pay', 900000, 'income', 5)")
+    con.commit()
+
+    b = mod.project_month(con, today=datetime(2026, 9, 5, 20, 0, tzinfo=tz))["basis"]
+    assert b["elapsed_days"] == 5 and b["usable"] is True and b["reasons"] == []

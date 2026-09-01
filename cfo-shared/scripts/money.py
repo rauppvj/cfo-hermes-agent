@@ -362,9 +362,23 @@ def basis(con, today=None) -> dict:
     month_income = month_totals(con, today.strftime("%Y-%m"))["income"]
     has_income = (fx["income"] + month_income + expected_income(con)) > 0
 
+    elapsed = today.day
+
     reasons = []
     if days < 5:
         reasons.append("fewer than 5 days of recorded spending")
+    if elapsed < 5:
+        # The guard above counts the whole ledger; this one counts the month
+        # being projected, and they come apart at exactly the wrong moment.
+        # On the 1st, a ledger with 49 days of history says `usable` while the
+        # pace is a single day multiplied by thirty: one trip to the shop at
+        # 14:44 became R$ 2.109,60 of projected variable spending, and the
+        # 08:00 brief before it -- nothing logged yet -- announced the month
+        # would close at exactly the fixed costs. Both figures are real,
+        # sourced and formatted, which is what makes them worth guarding.
+        reasons.append(
+            f"only {elapsed} day(s) of {today.strftime('%Y-%m')} have elapsed"
+            " -- a month extrapolated from that is not a pace")
     if not has_income:
         reasons.append("no income recorded -- add a salary with `fixed add`")
     if not fx["expense"]:
@@ -372,6 +386,7 @@ def basis(con, today=None) -> dict:
 
     return {
         "days_of_history": days,
+        "elapsed_days": elapsed,
         "has_income": has_income,
         "has_fixed_costs": bool(fx["expense"]),
         "usable": not reasons,
