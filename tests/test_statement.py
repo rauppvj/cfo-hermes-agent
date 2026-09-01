@@ -519,3 +519,138 @@ def test_an_empty_map_changes_no_answer_the_rules_gave(st, con):
     out = st.apply(con, BR, BR_MAP, dry_run=True)
     assert out["to_import"] == len(rows)
     assert all(r["category"] == st.categorize(r["description"]) for r in rows)
+
+
+# -- credit-card invoices ---------------------------------------------------
+#
+# A fatura shares almost nothing with a bank statement. The fixture mirrors a
+# real one line for line -- the same page furniture, the same glued amounts,
+# the same unsigned payment sitting among the purchases -- with invented
+# merchants and figures, because a real one is somebody's spending.
+
+FATURA = FIXTURES / "fatura_cartao.txt"
+CARD_MAP = {"format": "card_invoice"}
+
+
+def test_a_card_invoice_needs_no_mapping_to_be_recognised(st):
+    """It was reported as "no transaction lines found": rows date themselves
+    "29 abr", the statement parser wants 29/04, and nothing matched at all."""
+    out = st.sniff(FATURA)
+    assert out["format"] == "card_invoice"
+    assert out["purchases"] == 8
+    assert out["closing_date"] == "2026-06-03"
+
+
+def test_the_exchange_rate_at_the_end_is_not_the_transaction(st, con):
+    """A foreign purchase prints three numbers and the rate is LAST.
+
+    "NUVEM SERVICOS 100,00USD 19,00 | Cotação USD: R$5,26" is a charge of
+    R$ 100,00. Reading the amount at the end of the line -- which is what a
+    statement parser does, because there the last number is the balance --
+    imports R$ 5,26 instead. The row is present, the merchant is right, the
+    date is right, and the figure is off by a factor of nineteen.
+    """
+    rows, _ = st.extract(FATURA, CARD_MAP)
+    charge = [r for r in rows if r["description"] == "NUVEM SERVICOS"][0]
+    assert charge["amount_cents"] == 10000
+
+
+def test_the_invoice_payment_is_not_spending(st, con):
+    """The invoice carries its own settlement of last month, unsigned, in the
+    middle of the purchases. Imported as a purchase it nearly doubles the
+    month -- and it is already on the bank statement, leaving the account."""
+    rows, rejected = st.extract(FATURA, CARD_MAP)
+    assert all("pagamento" not in r["description"].lower() for r in rows)
+    assert any("payment" in r["reason"] for r in rejected)
+
+    out = st.apply(con, FATURA, CARD_MAP, dry_run=True)
+    assert out["expense"] == 51500          # exactly the subtotal it declares
+    assert out["income"] == 0
+
+
+def test_every_purchase_adds_up_to_the_subtotal_the_invoice_prints(st, con):
+    """The document states its own total, so the parse can be checked against
+    the file rather than against the parser's own idea of it."""
+    text = FATURA.read_text(encoding="utf-8")
+    declared = m_cents(next(l for l in text.splitlines()
+                            if "Subtotal deste" in l).split("R$")[1])
+    out = st.apply(con, FATURA, CARD_MAP, dry_run=True)
+    assert out["expense"] == declared == 51500
+
+
+def m_cents(raw):
+    import money as m
+    return m.parse_amount(raw)
+
+
+def test_the_year_comes_from_the_closing_date_not_from_today(st):
+    """Rows carry no year at all. Assuming the current one is wrong for every
+    invoice read in January about December, and wrong silently."""
+    rows, _ = st.extract(FATURA, CARD_MAP)
+    days = sorted(r["day"] for r in rows)
+    assert days[0] == "2026-04-28" and days[-1] == "2026-05-12"
+
+
+def test_an_invoice_that_closed_in_january_files_december_last_year(st, tmp_path):
+    """Everything on an invoice happened before it closed, so a month after
+    the closing month is the year before -- the one case that silently files
+    a whole December into a year nobody looks at."""
+    f = tmp_path / "jan.txt"
+    f.write_text(
+        "Compras e pagamentos feitos até o fechamento desta fatura em 03/01/27.\n"
+        "Valores em reais\n"
+        "         22 dez MERCADO CENTRAL 80,00\n"
+        "         03 jan PADARIA AURORA 12,00\n",
+        encoding="utf-8")
+
+    rows, _ = st.extract(f, CARD_MAP)
+    by_desc = {r["description"]: r["day"] for r in rows}
+    assert by_desc["MERCADO CENTRAL"] == "2026-12-22"
+    assert by_desc["PADARIA AURORA"] == "2027-01-03"
+
+
+def test_an_invoice_with_no_year_anywhere_refuses_to_guess(st, tmp_path):
+    f = tmp_path / "noyear.txt"
+    f.write_text("Valores em reais\n"
+                 "         22 dez MERCADO CENTRAL 80,00\n"
+                 "         23 dez PADARIA AURORA 12,00\n",
+                 encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        st.extract(f, CARD_MAP)
+    assert "closing" in str(exc.value)
+
+
+def test_four_identical_fares_on_one_day_are_four_fares(st, con):
+    """Repeats are not duplicates.
+
+    Four R$ 3,00 bus rides in an afternoon share a date, an amount and a
+    merchant. Deduplicating on those three fields keeps one and drops three,
+    and the import still reports success -- on the invoice this came from it
+    quietly removed R$ 9,00.
+    """
+    rows, _ = st.extract(FATURA, CARD_MAP)
+    fares = [r for r in rows if r["description"] == "ONIBUS URBANO"]
+    assert len(fares) == 3
+    assert len({r["hash"] for r in fares}) == 3
+
+    out = st.apply(con, FATURA, CARD_MAP, dry_run=False)
+    assert out["imported"] == 8
+
+
+def test_reimporting_the_same_invoice_is_still_free(st, con):
+    """Numbering the repeats must not cost the guarantee it was built around:
+    the same file read twice produces the same sequence, so the same hashes."""
+    st.apply(con, FATURA, CARD_MAP, dry_run=False)
+    again = st.apply(con, FATURA, CARD_MAP, dry_run=True)
+    assert again["to_import"] == 0
+    assert again["already_present"] == 8
+
+
+def test_page_furniture_is_never_a_transaction(st):
+    """An invoice is mostly not transactions: barcodes, page numbers,
+    instalment tables and a due date on every page."""
+    rows, _ = st.extract(FATURA, CARD_MAP)
+    assert len(rows) == 8
+    text = " ".join(r["description"] for r in rows)
+    for junk in ("Parcelamento", "Vencimento", "Limite", "33690"):
+        assert junk not in text

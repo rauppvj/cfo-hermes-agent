@@ -180,6 +180,37 @@ def sniff(path: Path, password: str | None = None) -> dict:
         raise SystemExit("statement is empty")
 
     if not looks_like_csv(text):
+        if looks_like_card_invoice(text):
+            closing = card_closing_date(text)
+            hits = parse_card_lines(text, closing)
+            spend = [h for h in hits if not h["credit"]]
+            credits = [h for h in hits if h["credit"]]
+            return {
+                "path": str(path), "encoding": encoding,
+                "format": "card_invoice",
+                "total_rows": len(hits),
+                "purchases": len(spend),
+                "closing_date": closing.isoformat() if closing else None,
+                "credits_excluded": [
+                    {"description": h["description"], "amount": h["amounts"][0],
+                     "why": h["credit"]} for h in credits],
+                "sample": [
+                    {"date": h["date"], "description": h["description"],
+                     "amount": h["amounts"][0]} for h in spend[:SAMPLE_ROWS]],
+                "next": (
+                    "a credit-card invoice: no mapping is needed, apply it with "
+                    "{\"format\":\"card_invoice\"}. Every row is a purchase in "
+                    "the account currency. Payments of the previous invoice and "
+                    "refunds are listed in credits_excluded and are NOT imported "
+                    "-- a payment is settling spending, not spending."
+                    if closing else
+                    "the invoice does not print the year of its rows and no "
+                    "closing date was found. Ask the owner which month this "
+                    "invoice closed and pass it as "
+                    "{\"format\":\"card_invoice\",\"closing\":\"YYYY-MM-DD\"} "
+                    "-- do not guess it"),
+            }
+
         hits = parse_text_lines(text)
         if not hits:
             raise SystemExit(
@@ -339,6 +370,132 @@ def parse_text_lines(text: str) -> list[dict]:
     return out
 
 
+
+# --------------------------------------------------------------------------
+# credit-card invoices
+# --------------------------------------------------------------------------
+#
+# A fatura is not a statement, and every assumption the statement parser makes
+# is wrong here. Rows carry a day and an abbreviated month with NO year
+# anywhere on the line. The amount is glued to the description with no
+# separator. A foreign purchase prints three numbers -- the charge in reais,
+# the original in its own currency, and the exchange rate -- and the rate is
+# LAST, so "the amount at the end of the line" reads the rate as the
+# transaction. And the invoice's own payment of the previous month sits in the
+# middle of the rows with no minus sign in front of it.
+
+MONTH_ABBR = {
+    "jan": 1, "fev": 2, "feb": 2, "mar": 3, "abr": 4, "apr": 4,
+    "mai": 5, "may": 5, "jun": 6, "jul": 7, "ago": 8, "aug": 8,
+    "set": 9, "sep": 9, "out": 10, "oct": 10, "nov": 11,
+    "dez": 12, "dic": 12, "dec": 12,
+}
+
+# Two decimals, always: it is what separates money from the account digits and
+# card suffixes that share a line ("C6 Platinum Final 2763").
+CARD_MONEY = r"\d{1,3}(?:\.\d{3})*,\d{2}"
+CARD_LINE = re.compile(
+    rf"^\s*(?P<day>\d{{1,2}})\s+(?P<mon>[A-Za-z\u00e7]{{3,4}})\.?\s+"
+    rf"(?P<rest>\S.*?)\s*(?<![\d.,])(?P<amount>{CARD_MONEY})"
+    rf"(?P<tail>\D.*)?$")
+
+# The closing date, never the due date: the due date is a month later, and
+# using it rolls every December purchase into the wrong year.
+CARD_CLOSING = re.compile(
+    r"(?:fechamento|fechada|ate|closing|through|statement date)"
+    r"[^0-9\n]{0,40}(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})",
+    re.IGNORECASE)
+ANY_FULL_DATE = re.compile(r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})\b")
+
+CARD_CREDITS = [
+    ("payment", ["inclusao de pagamento", "pagamento recebido",
+                 "pagamento efetuado", "pagamento da fatura", "pagamento de fatura",
+                 "payment received", "payment - thank you", "pgto fatura"]),
+    ("refund", ["estorno", "devolucao", "reembolso", "cashback", "refund",
+                "credito de ajuste"]),
+]
+
+
+def _as_date(day: int, month: int, year: int):
+    year += 2000 if year < 100 else 0
+    try:
+        return datetime(year, month, day).date()
+    except ValueError:
+        return None
+
+
+def card_closing_date(text: str, override: str | None = None):
+    """The day the invoice closed, which is the only year the rows have.
+
+    Rows say "29 abr" and nothing else. Assuming the current year is wrong for
+    every invoice read in January about December, and wrong silently -- the
+    rows import, into a year where they are in no total the owner ever looks
+    at.
+    """
+    if override:
+        return datetime.strptime(override, "%Y-%m-%d").date()
+
+    flat = strip_accents(text)
+    named = [d for d in (_as_date(int(mo.group(1)), int(mo.group(2)),
+                                  int(mo.group(3)))
+                         for mo in CARD_CLOSING.finditer(flat)) if d]
+    if named:
+        return min(named)
+    printed = [d for d in (_as_date(int(mo.group(1)), int(mo.group(2)),
+                                    int(mo.group(3)))
+                           for mo in ANY_FULL_DATE.finditer(flat)) if d]
+    return min(printed) if printed else None
+
+
+def card_credit_kind(description: str) -> str | None:
+    flat = strip_accents(description).lower()
+    for kind, needles in CARD_CREDITS:
+        if any(n in flat for n in needles):
+            return kind
+    return None
+
+
+def parse_card_lines(text: str, closing=None) -> list[dict]:
+    """Rows from a credit-card invoice, with the year resolved from closing."""
+    out = []
+    for i, line in enumerate(text.splitlines(), start=1):
+        mo = CARD_LINE.match(line.rstrip())
+        if not mo:
+            continue
+        month = MONTH_ABBR.get(strip_accents(mo.group("mon")).lower()[:3])
+        if not month:
+            continue
+        day = int(mo.group("day"))
+        year = None
+        if closing:
+            # Everything on an invoice happened before it closed, so a month
+            # after the closing month belongs to the year before.
+            year = closing.year if month <= closing.month else closing.year - 1
+        when = _as_date(day, month, year) if year else None
+        if year and not when:
+            continue
+
+        description = clean_description(mo.group("rest"))
+        tail = (mo.group("tail") or "").strip()
+        if "iof" in strip_accents(tail).lower()[:4]:
+            # A real charge, on the same day and merchant as the purchase it
+            # taxes. Marked so two rows for one shop are not a mystery.
+            description = f"{description} IOF"
+
+        out.append({
+            "line": i, "day": day, "month": month,
+            "date": when.isoformat() if when else None,
+            "description": description,
+            "amounts": [mo.group("amount")],
+            "credit": card_credit_kind(description),
+        })
+    return out
+
+
+def looks_like_card_invoice(text: str) -> bool:
+    return len(parse_card_lines(text)) > len(parse_text_lines(text))
+
+
 def looks_like_csv(text: str) -> bool:
     """Tell a delimited file from a de-PDF'd layout.
 
@@ -403,9 +560,37 @@ def parse_date(raw: str, preferred: str | None = None,
                                         " section header gave one)"))
 
 
-def row_hash(day: str, cents: int, description: str) -> str:
+def row_hash(day: str, cents: int, description: str, seq: int = 0) -> str:
+    """Identify a row so the same file cannot import twice.
+
+    `seq` is which occurrence this is of an otherwise identical row, and it is
+    the difference between deduplicating a file and deleting a person's day.
+    Four R$ 3,00 bus fares on one afternoon are four separate rides that share
+    a date, an amount and a merchant -- on this owner's June invoice exactly
+    that happened, and collapsing them dropped R$ 9,00 while the import
+    reported success. Counting the repeats keeps re-importing the same file
+    free (the same rows come back in the same order, so the same sequence) and
+    keeps a repeated purchase a purchase.
+
+    Seq 0 is written without the suffix, so every hash already in a ledger
+    stays what it was.
+    """
     key = f"{day}|{cents}|{strip_accents(description).lower().strip()}"
+    if seq:
+        key = f"{key}|{seq}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def stamp_hashes(rows: list[dict]) -> list[dict]:
+    """Give every row its hash, numbering repeats in the order they appear."""
+    seen: dict[tuple, int] = {}
+    for r in rows:
+        signed = r["amount_cents"] if r["kind"] == "expense" else -r["amount_cents"]
+        key = (r["day"], signed, strip_accents(r["description"]).lower().strip())
+        seq = seen.get(key, 0)
+        seen[key] = seq + 1
+        r["hash"] = row_hash(r["day"], signed, r["description"], seq)
+    return rows
 
 
 # --------------------------------------------------------------------------
@@ -423,6 +608,9 @@ def extract(path: Path, mapping: dict, password: str | None = None) -> tuple[lis
          "date_format": "%d/%m/%Y"}                # optional hint
     """
     info = sniff(path, password)
+    if (info.get("format") == "card_invoice"
+            or mapping.get("format") == "card_invoice"):
+        return extract_card(path, mapping, password)
     if info.get("format") == "text" or mapping.get("format") == "text":
         return extract_text(path, mapping, password)
     text, _ = read_text(path, password)
@@ -468,13 +656,11 @@ def extract(path: Path, mapping: dict, password: str | None = None) -> tuple[lis
                 "day": day, "amount_cents": cents, "kind": kind,
                 "description": description,
                 "category": categorize(description),
-                "hash": row_hash(day, cents if kind == "expense" else -cents,
-                                 description),
             })
         except (ValueError, KeyError) as exc:
             rejected.append({"line": i, "reason": str(exc),
                              "raw": {k: v for k, v in list(raw.items())[:4]}})
-    return rows, rejected
+    return stamp_hashes(rows), rejected
 
 
 def normalise_sign(raw: str) -> str:
@@ -512,13 +698,56 @@ def extract_text(path: Path, mapping: dict, password: str | None = None) -> tupl
                 "day": day, "amount_cents": cents, "kind": kind,
                 "description": description,
                 "category": categorize(description),
-                "hash": row_hash(day, cents if kind == "expense" else -cents,
-                                 description),
             })
         except ValueError as exc:
             rejected.append({"line": hit["line"], "reason": str(exc),
                              "raw": hit["description"][:40]})
-    return rows, rejected
+    return stamp_hashes(rows), rejected
+
+
+def extract_card(path: Path, mapping: dict,
+                 password: str | None = None) -> tuple[list[dict], list[dict]]:
+    """A credit-card invoice's purchases. Everything on one is an expense.
+
+    Except the rows that are not spending at all. The invoice carries its own
+    settlement of the previous month -- "Inclusao de Pagamento 2.675,69", no
+    sign, in the middle of the purchases. Imported as a purchase it nearly
+    DOUBLES the month: on this owner's June invoice it would have turned
+    R$ 2.975,48 of spending into R$ 5.651,17, and the figure would have looked
+    ordinary. It is also already recorded on the bank statement, as the
+    payment that leaves the account.
+    """
+    text, _ = read_text(path, password)
+    closing = card_closing_date(text, mapping.get("closing"))
+    if not closing:
+        raise SystemExit(
+            "this invoice does not print the year of its rows and no closing "
+            "date was found in it. Ask the owner which month it closed and "
+            "pass {\"format\":\"card_invoice\",\"closing\":\"YYYY-MM-DD\"} "
+            "-- a guessed year files the whole invoice into a month nobody "
+            "looks at")
+
+    rows, rejected = [], []
+    for hit in parse_card_lines(text, closing):
+        if hit["credit"]:
+            rejected.append({"line": hit["line"],
+                             "reason": f"{hit['credit']}: not spending",
+                             "raw": hit["description"][:40]})
+            continue
+        try:
+            cents = m.parse_amount(hit["amounts"][0])
+        except ValueError as exc:
+            rejected.append({"line": hit["line"], "reason": str(exc),
+                             "raw": hit["description"][:40]})
+            continue
+        if cents == 0:
+            continue
+        rows.append({
+            "day": hit["date"], "amount_cents": abs(cents), "kind": "expense",
+            "description": hit["description"],
+            "category": categorize(hit["description"]),
+        })
+    return stamp_hashes(rows), rejected
 
 
 def existing_hashes(con) -> set[str]:
@@ -887,16 +1116,26 @@ def _run(fn, argv):
     except SystemExit as exc:
         if exc.code in (0, None):
             raise
-        print(json.dumps({"error": str(exc.code), "ok": False},
-                         ensure_ascii=False))
+        # `say` belongs on THIS branch above all. A SystemExit is the
+        # ordinary, expected failure -- a file that will not parse, a mapping
+        # that is wrong -- so it is the envelope the agent actually meets,
+        # and it was the one branch that shipped without the instruction.
+        # The owner got `{"error": "no transaction lines found -- this file
+        # has no rows that start with a date...", "ok": false}` pasted at
+        # them, verbatim, as the answer to "import my card statements".
+        print(json.dumps({
+            "error": str(exc.code),
+            "ok": False,
+            "say": "tell the owner this in one sentence, in their language; never paste this object at them",
+        }, ensure_ascii=False))
         return 1
     except Exception as exc:                     # noqa: BLE001
         traceback.print_exc(file=sys.stderr)
         print(json.dumps({
             "error": f"{type(exc).__name__}: {exc}",
             "ok": False,
-            "say": "tell the owner in one sentence what did not work; "
-                   "do not paste this at them",
+            "say": "tell the owner in one sentence what did not work, in "
+                   "their language; never paste this object at them",
         }, ensure_ascii=False))
         return 1
 

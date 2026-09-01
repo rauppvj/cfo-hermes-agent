@@ -1,0 +1,34 @@
+Olá, ALEX! Sua fatura com
+vencimento em Junho chegou no
+valor de R$ 515,00.
+ Data do vencimento: 10 de Junho
+ Limite total: R$ 5.000,00
+Opções de pagamento
+1. Pagamento total
+2. Parcelamento de fatura Em até 11x de R$46,82
+Parcelamento Total a pagar CET
+R$ 561,84Entrada + 9x de R$ 56,18 152,57% a.a.
+ 33690.00009   00000.010314   13080.552931   1
+Lembrando: nesta fatura serão lançadas apenas transações feitas até 03/06/26.
+Compras e pagamentos feitos até o fechamento desta fatura em 03/06/26.
+Compras nacionais 411,00
+Compras internacionais 104,00
+Transações do cartão principal
+ 
+Cartao Final 1234 - ALEX SILVA
+ 
+Subtotal deste cartão R$ 515,00
+ 
+Valores em reais
+         28 abr NUVEM SERVICOS 100,00USD 19,00 | Cotação USD: R$5,26
+         28 abr NUVEM SERVICOS 4,00IOF Transações Exterior
+         30 abr MERCADO CENTRAL 158,00
+         02 mai ONIBUS URBANO 3,00
+         02 mai ONIBUS URBANO 3,00
+         02 mai ONIBUS URBANO 3,00
+         07 mai       Inclusao de Pagamento 900,00
+         09 mai PADARIA AURORA 44,00
+         12 mai LIVRARIA DO PORTO 200,00
+1 8/
+Vencimento: 10 de Junho
+Valor da fatura: R$ 515,00

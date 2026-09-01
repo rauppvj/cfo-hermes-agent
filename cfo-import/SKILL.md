@@ -13,6 +13,37 @@ their money goes. It is the difference between a demo and something they keep.
 is for — this is the one skill where the agent genuinely drives the owner's
 computer rather than just talking about money.
 
+## 0. A card invoice is not a bank statement
+
+Both arrive as "my statement". They are different documents and the tool tells
+them apart on its own — `inspect` answers `"format": "card_invoice"` — but
+know which you are holding, because the difference changes what the numbers
+mean.
+
+A **fatura / credit-card invoice** needs no column mapping at all:
+
+```sh
+python3 .../statement.py inspect /opt/data/inbox/fatura.pdf
+python3 .../statement.py apply   /opt/data/inbox/fatura.pdf --map '{"format":"card_invoice"}' --commit
+```
+
+Three things about it are worth saying to the owner:
+
+- **The invoice's own payment is not spending.** "Inclusao de Pagamento" is
+  last month's bill being settled, and it sits among the purchases with no
+  minus sign. It is left out, and listed in `credits_excluded` so you can say
+  what was skipped. It is also the same money as the "PGTO FAT CARTAO" line on
+  the bank statement — import both and the card is counted once, correctly.
+- **The rows carry no year.** The tool takes it from the invoice's closing
+  date. If the invoice does not print one, it stops and asks rather than
+  guessing — pass `{"format":"card_invoice","closing":"YYYY-MM-DD"}` with the
+  month the owner tells you. Never guess it: a whole invoice in the wrong year
+  is invisible in every total.
+- **Foreign purchases are already converted.** The amount imported is the one
+  charged in the owner's currency; the original and the exchange rate on the
+  same line are not transactions. The IOF on the same day and merchant is
+  real, and is marked `IOF` so two rows for one shop are not a mystery.
+
 ## 1. Find the file, through Latch
 
 Statements land in `~/Downloads`. Ask what it is called, or list the likely

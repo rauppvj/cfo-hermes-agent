@@ -822,16 +822,26 @@ def _run(fn, argv):
     except SystemExit as exc:
         if exc.code in (0, None):
             raise
-        print(json.dumps({"error": str(exc.code), "ok": False},
-                         ensure_ascii=False))
+        # `say` belongs on THIS branch above all. A SystemExit is the
+        # ordinary, expected failure -- a file that will not parse, a mapping
+        # that is wrong -- so it is the envelope the agent actually meets,
+        # and it was the one branch that shipped without the instruction.
+        # The owner got `{"error": "no transaction lines found -- this file
+        # has no rows that start with a date...", "ok": false}` pasted at
+        # them, verbatim, as the answer to "import my card statements".
+        print(json.dumps({
+            "error": str(exc.code),
+            "ok": False,
+            "say": "tell the owner this in one sentence, in their language; never paste this object at them",
+        }, ensure_ascii=False))
         return 1
     except Exception as exc:                     # noqa: BLE001
         traceback.print_exc(file=sys.stderr)
         print(json.dumps({
             "error": f"{type(exc).__name__}: {exc}",
             "ok": False,
-            "say": "tell the owner in one sentence what did not work; "
-                   "do not paste this at them",
+            "say": "tell the owner in one sentence what did not work, in "
+                   "their language; never paste this object at them",
         }, ensure_ascii=False))
         return 1
 
