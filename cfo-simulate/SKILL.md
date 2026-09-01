@@ -36,6 +36,20 @@ missing, in one line, and ask for the one thing that would fix it:
 `basis.reasons` lists what is missing. Lead with the income one — it is the
 gap that inverts the answer.
 
+**One reason has nothing to ask for.** In the first days of a month
+`elapsed_days` is 1 or 2 and the pace is a single purchase multiplied by
+thirty — there is no missing fact, only a month that has not happened yet.
+Do not ask for anything; say so and answer with what *is* solid, which is
+usually enough to decide with:
+
+> Setembro tem um dia, então ainda não dá pra falar em ritmo. O que está
+> certo: R$ 2.480,00 de contas fixas e R$ 70,32 gastos até agora. Uma compra
+> de R$ 1.200,00 cabe nisso com folga; se quiser, eu confirmo daqui a alguns
+> dias com o mês já andando.
+
+A purchase against known fixed costs and month-to-date is a real answer. A
+verdict against a thirty-times-one-day pace is not.
+
 **Every number you say is one of those fields.** You do not work out what is
 left over, you do not divide the price yourself, and you do not judge
 affordability by feel. `fits_this_month` is the verdict; the rest is how you

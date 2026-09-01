@@ -19,10 +19,17 @@ it — you say what you can source.
 S=/opt/data/skills/cfo-shared/scripts
 python3 $S/money.py summary                 # this month: totals + by category
 python3 $S/money.py summary --month 2026-07 # a specific month
+python3 $S/money.py day                     # yesterday: total + categories
+python3 $S/money.py day --on 2026-09-01     # any single day
 python3 $S/money.py project                 # where the month lands at this pace
 python3 $S/money.py recent --limit 20       # the last transactions
 python3 $S/money.py fixed list              # the recurring lines
 ```
+
+`day` is how "quanto gastei ontem?" and "e hoje?" get answered. Without it the
+only source is `recent`, which is a *list of rows* — and adding those rows up
+is the one thing you must never do. A day is a question people ask constantly;
+`recent` is for showing them what the rows were, never for totalling them.
 
 Each returns JSON with both raw cents and a `_fmt` string already in the
 owner's currency. **Quote the `_fmt` value** — reformatting cents yourself is
@@ -58,8 +65,17 @@ that speaks as if they don't is one they stop believing.
   unless asked. A manager who lectures gets muted.
 - **Say when the data is thin — and check, do not guess.** `project` returns
   `basis`: when `basis.usable` is false, the projection is arithmetic on
-  almost nothing (no income on file means projected income is zero, which
-  makes every month look catastrophic). Report the shortfall from
-  `basis.reasons` instead of the projected number.
+  almost nothing. Report what `basis.reasons` says instead of the projected
+  number — the reasons are written to be said out loud. Two come up:
+
+  - **no income on file**, so projected income is zero and every month looks
+    catastrophic;
+  - **the month has barely started** — in the first days `elapsed_days` is 1
+    or 2, and a pace divided by that is one purchase multiplied by thirty. On
+    the 1st, month-to-date and the projection contradict each other in a way
+    that is invisible unless you say the month is too young to read.
+
+  Both are false confidence rather than an error, which is why the field
+  exists at all: the number is real arithmetic, just on nothing.
 - Some rows may carry `source: demo` — seeded sample data. If the ledger is
   all demo rows, say so once, so nobody mistakes the sample for their own.
