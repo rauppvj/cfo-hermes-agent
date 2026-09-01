@@ -4,6 +4,6 @@
     "schedule": "0 8 * * *",
     "prompt": "Run the cfo-brief skill: send today's financial brief. If there is nothing worth reporting, send nothing rather than padding it.",
     "skills": ["cfo-brief"],
-    "deliver": "${PLOW_HOME_CHANNEL}"
+    "deliver": "plow_chat:${PLOW_HOME_CHANNEL}"
   }
 ]
