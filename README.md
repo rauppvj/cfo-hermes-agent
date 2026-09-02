@@ -6,8 +6,8 @@ actually costs you before you make it — over iMessage, with the ledger living
 as a file on your own machine.
 
 A [Hermes](https://howto.plow.co/hermes) agent, texted through
-[Plow Chat](https://plow.co) and running your own Mac through
-[Plow Latch](https://plow.co/latch). Deployed with
+[Plow Chat](https://plow.co) and installed with one command. Optionally drives
+your own Mac through [Plow Latch](https://plow.co/latch). Deployed with
 [`plow-pbc/agent-mgr`](https://github.com/plow-pbc/agent-mgr).
 
 ```
@@ -97,9 +97,10 @@ while leaving anything you logged yourself untouched.
 ## Start from the statement, not from typing
 
 An empty ledger answers nothing, and nobody types ninety days of history into
-a chat. So the way in is the file already sitting in the owner's Downloads:
-`cfo-import` reaches it through Latch and reads it here, and it handles both
-documents people mean by "my statement".
+a chat. So the way in is the file the bank already gave you: **send it to the
+agent as an attachment** and `cfo-import` reads it — or, if Latch is set up,
+it takes the file out of `~/Downloads` without being sent anything. Both
+handle either document people mean by "my statement".
 
 **Bank statements** — CSV, or a PDF where the bank offers no export, in any
 language. The parser is built around what real files do rather than what a
@@ -129,10 +130,30 @@ and the owner is asked once rather than every month.
 Nothing about the import is arithmetic, which is why the model is allowed near
 it at all. Every total it reports still comes from `money.py`.
 
-## Deploy it as an agent
+## Install it
 
-Prerequisites: `python3` 3.11+, `docker`, an authenticated `gh`, and
-[Plow Latch](https://plow.co/latch) on the Mac the agent should drive.
+Prerequisites: `docker` running, `python3` 3.11+, `git`, and an authenticated
+`gh` (`gh auth login`).
+
+```sh
+git clone https://github.com/rauppvj/cfo-hermes-agent.git
+cd cfo-hermes-agent
+./install.sh
+```
+
+It stops twice, both times for something only you can do: texting an
+activation code from the phone that will own the agent, and entering a device
+code for the model provider. Everything else — installing `agent-mgr`,
+registering, deploying, starting the container, registering the brief — it
+does.
+
+**Re-run it whenever.** Every step checks whether it is already done and says
+so instead of repeating it. `activate` is guarded hardest: it is a one-time
+spend that binds the agent permanently to the handset that answers it, so it
+never runs twice.
+
+<details>
+<summary>What it does, if you would rather run it yourself</summary>
 
 ```sh
 git clone https://github.com/plow-pbc/agent-mgr.git ~/services/agent-mgr
@@ -140,16 +161,20 @@ ln -sf ~/services/agent-mgr/agent-mgr ~/.local/bin/agent-mgr
 
 agent-mgr register cfo /path/to/cfo-hermes-agent
 agent-mgr deploy cfo
-```
-
-```sh
 agent-mgr activate cfo      # prints a code — text it from the owner's phone
 agent-mgr up cfo
 agent-mgr cron-sync cfo     # registers the hourly brief tick
 agent-mgr sign-in cfo       # device-code OAuth for the model credential
-agent-mgr set-latch cfo     # DOMO_DEVICE_UID then DOMO_MCP_TOKEN, on stdin
-agent-mgr check-latch cfo
 ```
+</details>
+
+**[Plow Latch](https://plow.co/latch) is optional** — the installer offers it
+last and most people should skip it. It lets the agent reach the Mac and pick
+a statement out of `~/Downloads` itself; without it you send the statement to
+the chat as an attachment and the import is identical. Add it later with
+`agent-mgr set-latch cfo && agent-mgr deploy cfo`; the deploy is what turns
+the declaration on, and with no credential on file it stays off rather than
+retrying a connection it cannot make on every boot.
 
 **There is no timezone to set here.** You tell the agent what city you are in,
 in the chat, and that is the only place the zone lives:

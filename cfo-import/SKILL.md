@@ -1,6 +1,6 @@
 ---
 name: cfo-import
-description: Import a bank or credit-card statement the owner has on their Mac — any bank, any country, CSV or exported text — then propose the salary and fixed bills it reveals so the agent configures itself instead of interviewing them. Use when the owner mentions a statement, extrato, fatura, CSV or export, asks to import their history, asks the agent to "read my statement", or wants their real spending loaded instead of typing it in. Also use to undo a previous import.
+description: Import a bank or credit-card statement — sent to the chat as an attachment, or picked off the owner's Mac through Latch — any bank, any country, CSV or PDF, then propose the salary and fixed bills it reveals so the agent configures itself instead of interviewing them. Use when the owner mentions a statement, extrato, fatura, CSV or export, sends a file, asks to import their history, asks the agent to "read my statement", or wants their real spending loaded instead of typing it in. Also use to undo a previous import.
 ---
 
 # Import a statement
@@ -9,9 +9,9 @@ Ninety days of real history turns an agent that knows nothing into one that
 already knows what this person earns, what they pay every month, and where
 their money goes. It is the difference between a demo and something they keep.
 
-**The file is on the Mac. You are in a container.** Reaching it is what Latch
-is for — this is the one skill where the agent genuinely drives the owner's
-computer rather than just talking about money.
+**The file is not where you are.** You are in a container; the statement is on
+the owner's phone or Mac. There are two ways across, and the one that always
+works is the one to offer.
 
 ## 0. A card invoice is not a bank statement
 
@@ -44,10 +44,26 @@ Three things about it are worth saying to the owner:
   same line are not transactions. The IOF on the same day and merchant is
   real, and is marked `IOF` so two rows for one shop are not a mystery.
 
-## 1. Find the file, through Latch
+## 1. Getting the file
 
-Statements land in `~/Downloads`. Ask what it is called, or list the likely
-ones through Latch and offer what you find:
+### The way that always works: they send it
+
+A statement attached to a chat message is already downloaded by the time you
+read the turn — the platform writes it to `/opt/data/cache/documents/` and the
+turn carries the absolute path. Pass that path straight to `inspect`. Nothing
+to install, no Mac needed, and it is the same import either way.
+
+> Me manda o extrato aqui mesmo, como anexo — PDF ou CSV, direto do app do
+> banco. Eu leio daqui.
+
+**Never ask them to paste the contents of a statement into the chat.** A
+pasted PDF is unreadable and a pasted CSV loses its structure; ask for the
+file itself.
+
+### The shortcut, when Latch is configured
+
+If this instance has Latch, the file does not need sending — you can take it
+from the Mac's Downloads yourself:
 
     ls -t ~/Downloads/*.csv 2>/dev/null | head -10
 
@@ -58,6 +74,11 @@ the Mac:
 
 Read the file through Latch and write it to `/opt/data/inbox/<filename>`.
 Never point the importer at a path on the Mac; the container cannot see it.
+
+Latch is optional and most installs do not have it. If reaching the Mac fails,
+that is not an error to report — **ask for the file in the chat** and carry
+on. Never tell the owner an import is impossible: the attachment path is
+always open.
 
 ## 1b. PDFs, including locked ones
 

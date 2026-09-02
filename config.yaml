@@ -26,13 +26,18 @@ mcp_servers:
   # authorises each action. Both values come from the agent's own dotenv, so
   # the credential never appears in this file or in a URL in git.
   #
-  # THIS BLOCK IS THE DECLARATION. An agent that drives no Mac deletes it --
-  # leaving it in place with blank DOMO_* values is a configured latch with no
-  # credential, which is a broken agent rather than an unconfigured one, and
-  # `agent-mgr check-latch` says so.
+  # OPTIONAL, and `enabled` here is not the last word: scripts/deploy-hook.sh
+  # sets it from whether this instance's own .env carries DOMO_DEVICE_UID.
+  # Latch is a shortcut, not a dependency -- the agent reads a statement the
+  # owner sends as a chat attachment just as well, which is why installing it
+  # is offered last and skipped by most people. What the hook prevents is the
+  # in-between state: a declared server with no credential is retried on every
+  # boot, fails, and parks, so the instance carries a permanently broken
+  # connection instead of a feature that is simply off.
   #
-  # Baseline rather than optional because most agents want it: a new one is
-  # wired for Latch and you remove this if it drives nothing.
+  # The block stays in the file either way. `agent-mgr set-latch` refuses an
+  # agent whose config declares no latch, so deleting it would close the door
+  # on ever adding one.
   latch:
     url: https://api.plow.co/v1/relay/devices/${DOMO_DEVICE_UID}/mcp
     headers:
