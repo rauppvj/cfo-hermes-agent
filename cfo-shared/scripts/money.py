@@ -201,9 +201,10 @@ def set_cfg(con: sqlite3.Connection, key: str, value: str) -> None:
 # nobody would think to look for.
 BRIEF_SLOTS = (
     ("morning", "brief_hour", "8"),
-    # Ships off. A slot the gate can open before cfo-brief knows how to write
-    # that brief would send the morning one at night.
-    ("evening", "night_brief_hour", "off"),
+    # On by default, and silent by default: cfo-brief sends an evening message
+    # only when something was logged, something falls due tomorrow, or
+    # something turned. A quiet evening is meant to produce no message at all.
+    ("evening", "night_brief_hour", "22"),
 )
 BRIEF_HOUR_KEYS = tuple(key for _, key, _ in BRIEF_SLOTS)
 HOUR_OFF = {"off", "none", "never", "no", "false", "-"}
@@ -324,7 +325,7 @@ def month_totals(con, month: str) -> dict:
     return out
 
 
-def day_totals(con, day: str) -> dict:
+def day_totals(con, day: str, today=None) -> dict:
     """One day, in the owner's own zone.
 
     The brief is meant to open with what yesterday cost, and it could not:
@@ -333,6 +334,14 @@ def day_totals(con, day: str) -> dict:
     dropped its own lead sentence every morning, and sent a monthly
     projection instead -- which is a bank app, not a manager. The README's
     own example, "Bom dia. Ontem R$ 87,00.", was unreachable.
+
+    `partial` says the day is still being spent. It exists for the evening
+    brief: at 22:00 the day has two hours left, and a total announced as
+    closed is one the morning brief will contradict tomorrow with a bigger
+    number for the same date. Both figures are correct and the agent looks
+    like it cannot count -- which costs more trust than the missing number
+    ever bought. The field is here rather than in the skill because a rule in
+    prose is one the model can reason its way around at 22:00.
     """
     rows = con.execute(
         "SELECT kind, SUM(amount_cents) AS total, COUNT(*) AS n"
@@ -344,6 +353,7 @@ def day_totals(con, day: str) -> dict:
         out[r["kind"]] = int(r["total"] or 0)
         out["count"] += int(r["n"])
     out["net"] = out["income"] - out["expense"]
+    out["partial"] = day == (today or now_local(con)).strftime("%Y-%m-%d")
     out["categories"] = [
         {"category": r["category"], "total": int(r["total"]), "n": int(r["n"])}
         for r in con.execute(
@@ -802,6 +812,12 @@ def main(argv=None) -> int:
 
     d1 = sub.add_parser("day", help="one day's total (default: yesterday)")
     d1.add_argument("--on", default=None, help="YYYY-MM-DD (default: yesterday)")
+    # The evening brief's opening figure. A flag rather than a date the model
+    # types: "today" resolved in the owner's zone is exactly the thing this
+    # engine exists to keep out of the model's hands, and at 23:40 in Sao
+    # Paulo the container's own date is already tomorrow.
+    d1.add_argument("--today", action="store_true",
+                    help="the owner's today, so far (implies partial)")
 
     sub.add_parser("project", help="project this month's close at the current pace")
     sub.add_parser("status", help="where this person stands and what is missing")
@@ -862,7 +878,10 @@ def main(argv=None) -> int:
               "currency": cur}, cur)
 
     elif args.cmd == "day":
-        when = args.on or yesterday_local(con)
+        if args.today:
+            when = now_local(con).strftime("%Y-%m-%d")
+        else:
+            when = args.on or yesterday_local(con)
         emit({**day_totals(con, when), "currency": cur}, cur)
 
     elif args.cmd == "status":

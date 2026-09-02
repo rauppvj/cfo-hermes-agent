@@ -389,6 +389,37 @@ def test_a_day_with_nothing_on_it_says_zero_rather_than_nothing(mod, con):
     assert out["expense"] == 0 and out["count"] == 0 and out["categories"] == []
 
 
+def test_the_day_still_being_spent_says_so(mod, con):
+    """`partial` is what stops the evening brief closing a day that is open.
+
+    At 22:00 the day has two hours left. An evening message that reports the
+    total as final is one the next morning's brief contradicts with a bigger
+    number for the SAME date -- both correct, and the agent looks like it
+    cannot count. The flag is a field rather than a line in the skill because
+    a rule in prose is one the model can reason its way around at 22:00.
+    """
+    tz = mod.ZoneInfo("America/Sao_Paulo")
+    tonight = datetime(2026, 9, 2, 22, 0, tzinfo=tz)
+    mod.add_tx(con, 13240, "expense", "food", when=tonight)
+
+    assert mod.day_totals(con, "2026-09-02", today=tonight)["partial"] is True
+    assert mod.day_totals(con, "2026-09-01", today=tonight)["partial"] is False
+
+
+def test_partial_is_the_owners_day_not_the_containers(mod, con):
+    """At 22:00 in Sao Paulo it is already the next day in UTC.
+
+    Read in UTC, tonight's date is tomorrow's -- so today's own total would
+    come back `partial: false`, as a closed day, at exactly the hour the
+    evening brief runs.
+    """
+    tz = mod.ZoneInfo("America/Sao_Paulo")
+    tonight = datetime(2026, 9, 2, 22, 0, tzinfo=tz)
+    assert tonight.astimezone(timezone.utc).strftime("%Y-%m-%d") == "2026-09-03"
+
+    assert mod.day_totals(con, "2026-09-02", today=tonight)["partial"] is True
+
+
 def test_a_month_barely_begun_is_not_a_pace(mod, con):
     """49 days of history and a projection standing on one of them.
 

@@ -99,12 +99,12 @@ def test_an_off_slot_never_opens(gate):
 
 # -- hours as a ledger setting --------------------------------------------
 
-def test_hours_come_from_the_ledger_and_default_to_eight(gate, con):
+def test_hours_come_from_the_ledger_and_default_to_eight_and_ten(gate, con):
     import money
-    assert money.brief_hours(con) == {"morning": 8, "evening": None}
+    assert money.brief_hours(con) == {"morning": 8, "evening": 22}
     money.set_cfg(con, "brief_hour", "6")
-    money.set_cfg(con, "night_brief_hour", "22")
-    assert money.brief_hours(con) == {"morning": 6, "evening": 22}
+    money.set_cfg(con, "night_brief_hour", "off")
+    assert money.brief_hours(con) == {"morning": 6, "evening": None}
 
 
 def test_a_hand_mangled_hour_falls_back_to_the_default_not_to_off(gate, con):

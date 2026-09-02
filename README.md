@@ -21,7 +21,12 @@ cfo   Cabe, mas o mês fecha em R$ 300,00 no vermelho no ritmo atual.
 08:00 Bom dia. Ontem R$ 87,00. No ritmo atual setembro fecha em
       R$ 3.240,00, R$ 400,00 acima do previsto. Alimentação já passou
       o mês inteiro de agosto.
+
+22:00 Hoje até agora R$ 132,40. Amanhã vence o condomínio, R$ 420,00.
 ```
+
+Both at those hours **where you live** — and the evening one only when the day
+gave it something to say.
 
 > [!IMPORTANT]
 > **This repo is code only.** Nothing under this tree may carry a credential,
@@ -178,7 +183,7 @@ agent permanently** — send it from the phone that should own it.
 | [`cfo-log`](cfo-log/SKILL.md) | records a spend or income from plain language |
 | [`cfo-ask`](cfo-ask/SKILL.md) | answers questions about the month, a category, a comparison |
 | [`cfo-simulate`](cfo-simulate/SKILL.md) | what a purchase does to the month, upfront or split |
-| [`cfo-brief`](cfo-brief/SKILL.md) | the 08:00 brief — the only time it speaks first |
+| [`cfo-brief`](cfo-brief/SKILL.md) | the morning and evening briefs — the only times it speaks first |
 | [`cfo-setup`](cfo-setup/SKILL.md) | first run: timezone, currency, fixed lines, sample data |
 | [`cfo-import`](cfo-import/SKILL.md) | reads a bank statement or card invoice off the owner's Mac |
 
@@ -188,7 +193,7 @@ agent permanently** — send it from the phone that should own it.
 python3 -m pytest tests/ -q
 ```
 
-121 of them, and the ones that earn their place are the boundary tests: an
+123 of them, and the ones that earn their place are the boundary tests: an
 amount read in the wrong locale (`R$ 1.234,56` vs `1,234.56`), a day resolved
 in the wrong zone, a merchant name matched inside a longer word (`Raia` in
 `PRAIA GRANDE`), four identical bus fares on one afternoon collapsed into one
