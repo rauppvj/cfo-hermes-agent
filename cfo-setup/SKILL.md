@@ -1,6 +1,6 @@
 ---
 name: cfo-setup
-description: Walk a new owner through the short setup that makes the rest of the agent work — timezone, currency, what they earn and how often, and their fixed monthly costs — one question at a time, and optionally load three months of sample data. Use on first contact, whenever `money status` reports `ready: false`, when the owner asks to set things up or change their income, salary date, pay frequency, currency or timezone, and when they ask for sample data or to clear it.
+description: Walk a new owner through the short setup that makes the rest of the agent work — timezone, currency, what they earn and how often, and their fixed monthly costs — one question at a time, and optionally load three months of sample data. Use on first contact, whenever `money status` reports `ready: false`, when the owner asks to set things up or change their income, salary date, pay frequency, currency or timezone, when they ask what time the brief arrives or want it at a different hour (or stopped), and when they ask for sample data or to clear it.
 ---
 
 # Setting someone up
@@ -64,6 +64,21 @@ conversion in your head.
 Infer the timezone from the city rather than asking for an IANA name — nobody
 knows they live in `America/Sao_Paulo`. Same for currency: infer it, then
 confirm it in the line where you confirm the city.
+
+**The city sets the clock for everything, including the brief.** The daily
+brief fires on the hours in `status.configured` — read in the owner's own
+zone, not the container's — so the city answer is also what makes the morning
+message arrive in the morning. Never ask for a brief time during setup: 08:00
+is the default and one more question is what turns setup into a form.
+
+```sh
+python3 $S/money.py config brief_hour 7      # "me manda o resumo às 7"
+python3 $S/money.py config brief_hour off    # "para de me mandar de manhã"
+```
+
+Only when they ask. If they want to know when it arrives, `status` already
+carries the answer — do not guess an hour, and never state one you did not
+read.
 
 ## Two ways in, and the owner picks
 

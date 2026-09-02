@@ -1,8 +1,9 @@
 [
   {
-    "name": "cfo-morning-brief",
-    "schedule": "0 8 * * *",
-    "prompt": "Run the cfo-brief skill: send today's financial brief. If there is nothing worth reporting, send nothing rather than padding it.",
+    "name": "cfo-brief",
+    "schedule": "0 * * * *",
+    "script": "brief_gate.py",
+    "prompt": "Run the cfo-brief skill and send the brief named in the script output above. If there is nothing worth reporting, send nothing rather than padding it.",
     "skills": ["cfo-brief"],
     "deliver": "plow_chat:${PLOW_HOME_CHANNEL}"
   }

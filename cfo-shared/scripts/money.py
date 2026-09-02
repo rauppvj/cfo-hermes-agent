@@ -194,6 +194,76 @@ def set_cfg(con: sqlite3.Connection, key: str, value: str) -> None:
     con.commit()
 
 
+# The hours the brief gate opens on, held here rather than in a cron
+# expression: the container's clock is the fleet's, the owner's is theirs.
+# Defined here rather than in brief_gate.py so the default hour has ONE
+# definition -- a gate that opens at 8 while `status` reports 9 is a bug
+# nobody would think to look for.
+BRIEF_SLOTS = (
+    ("morning", "brief_hour", "8"),
+    # Ships off. A slot the gate can open before cfo-brief knows how to write
+    # that brief would send the morning one at night.
+    ("evening", "night_brief_hour", "off"),
+)
+BRIEF_HOUR_KEYS = tuple(key for _, key, _ in BRIEF_SLOTS)
+HOUR_OFF = {"off", "none", "never", "no", "false", "-"}
+
+
+def hour_or_none(raw: str, default: str) -> int | None:
+    """A configured brief hour, or None when that slot is off.
+
+    An unparseable value falls back to the DEFAULT, not to off: `validate_cfg`
+    refuses anything but an hour or `off`, so a broken value here was
+    hand-edited, and reading a typo as "the owner turned this off" is a
+    silent unsubscribe nobody asked for.
+    """
+    val = (raw or "").strip().lower() or (default or "").strip().lower()
+    if val in HOUR_OFF:
+        return None
+    try:
+        hour = int(val)
+    except ValueError:
+        hour = -1
+    if 0 <= hour <= 23:
+        return hour
+    print(f"warning: unusable brief hour {raw!r}, falling back to {default!r}",
+          file=sys.stderr)
+    return None if val == (default or "").strip().lower() else hour_or_none(default, default)
+
+
+def brief_hours(con: sqlite3.Connection) -> dict:
+    """{slot: hour in the owner's zone, or None when off}."""
+    return {name: hour_or_none(get_cfg(con, key), default)
+            for name, key, default in BRIEF_SLOTS}
+
+
+def validate_cfg(key: str, value: str) -> str:
+    """The value as it should be stored, or a refusal.
+
+    `config` writes any key the agent hands it, which is right for a setting
+    the model infers from a city name. It is wrong for the two that decide
+    whether the brief fires at all: `config brief_hour 8h` would store `8h`,
+    the gate would read it as unparseable, and the owner would find out by
+    noticing, some week later, that the agent had stopped talking. There is
+    no error to see -- silence is what a working schedule and a broken one
+    both look like.
+    """
+    if key not in BRIEF_HOUR_KEYS:
+        return value
+    val = (value or "").strip().lower()
+    if val in HOUR_OFF:
+        return "off"
+    try:
+        hour = int(val)
+    except ValueError:
+        raise SystemExit(
+            f"{key} must be an hour from 0 to 23, or `off` -- got {value!r}")
+    if not 0 <= hour <= 23:
+        raise SystemExit(
+            f"{key} must be an hour from 0 to 23, or `off` -- got {value!r}")
+    return str(hour)
+
+
 def tz_of(con: sqlite3.Connection) -> ZoneInfo:
     """The owner's zone. Falls back to UTC loudly rather than to the
     container's clock, which is the fleet default and belongs to nobody."""
@@ -493,6 +563,10 @@ def status(con, today=None) -> dict:
         "configured": {
             "timezone": get_cfg(con, "timezone") or None,
             "currency": get_cfg(con, "currency") or None,
+            # In the owner's own zone, which is what the gate opens on. Here
+            # so "a que horas voce me manda o resumo?" is a field to read
+            # rather than a cron expression nobody in the chat can see.
+            **{key: brief_hours(con)[name] for name, key, _ in BRIEF_SLOTS},
         },
         "month": month,
         "expense": totals["expense"],
@@ -855,8 +929,9 @@ def main(argv=None) -> int:
 
     elif args.cmd == "config":
         if args.key and args.value is not None:
-            set_cfg(con, args.key, args.value)
-            emit({args.key: args.value})
+            stored = validate_cfg(args.key, args.value)
+            set_cfg(con, args.key, stored)
+            emit({args.key: stored})
         elif args.key:
             emit({args.key: get_cfg(con, args.key)})
         else:

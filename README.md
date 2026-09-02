@@ -137,24 +137,36 @@ agent-mgr register cfo /path/to/cfo-hermes-agent
 agent-mgr deploy cfo
 ```
 
-**Then set your timezone before starting it** — `agent-mgr resolve cfo` prints
-the home; put `AGENT_TZ=America/Sao_Paulo` in the `.env` there:
-
-> This is not cosmetic. agent-mgr's fleet default is `America/Los_Angeles`,
-> which belongs to nobody. An expense at 22:00 in São Paulo is 01:00 the next
-> day in UTC and 18:00 the same day in Los Angeles — and on the last day of a
-> month, the wrong zone files it in the wrong month and closes two months
-> wrong. Every row stores both the UTC instant and the owner's local day,
-> resolved once at write time.
-
 ```sh
 agent-mgr activate cfo      # prints a code — text it from the owner's phone
 agent-mgr up cfo
-agent-mgr cron-sync cfo     # registers the 08:00 brief
+agent-mgr cron-sync cfo     # registers the hourly brief tick
 agent-mgr sign-in cfo       # device-code OAuth for the model credential
 agent-mgr set-latch cfo     # DOMO_DEVICE_UID then DOMO_MCP_TOKEN, on stdin
 agent-mgr check-latch cfo
 ```
+
+**There is no timezone to set here.** You tell the agent what city you are in,
+in the chat, and that is the only place the zone lives:
+
+> The zone decides which **day** — and on the 31st, which **month** — an
+> expense belongs to. An expense at 22:00 in São Paulo is 01:00 the next day
+> in UTC and 18:00 the same day in Los Angeles. Every row stores both the UTC
+> instant and the owner's local day, resolved once at write time against
+> `money.py config timezone`.
+>
+> The brief follows the same setting. The registered job ticks hourly and
+> [`brief_gate.py`](cfo-shared/scripts/brief_gate.py) answers every tick that
+> is not a brief hour *for this owner* with `{"wakeAgent": false}` — which the
+> scheduler reads as "skip the agent entirely": no model run, no delivery, no
+> cost. A cron expression could not do this. It fires in the container's zone,
+> which agent-mgr defaults to `America/Los_Angeles` for the whole fleet, so a
+> `0 8 * * *` brief reaches Tokyo at midnight and nothing anywhere reports it.
+>
+> Change the hour by asking: *"me manda o resumo às 7"* → `money.py config
+> brief_hour 7`, or `off` to stop it. The setter refuses anything that is not
+> an hour, because a schedule that is quietly broken and one that is working
+> look exactly alike.
 
 `activate` is a **one-time spend and the handset that texts the code owns the
 agent permanently** — send it from the phone that should own it.
@@ -176,12 +188,14 @@ agent permanently** — send it from the phone that should own it.
 python3 -m pytest tests/ -q
 ```
 
-110 of them, and the ones that earn their place are the boundary tests: an
+121 of them, and the ones that earn their place are the boundary tests: an
 amount read in the wrong locale (`R$ 1.234,56` vs `1,234.56`), a day resolved
 in the wrong zone, a merchant name matched inside a longer word (`Raia` in
 `PRAIA GRANDE`), four identical bus fares on one afternoon collapsed into one
-by a deduplicator. Every one of those fails *silently* — it produces a number,
-just not the right one, and nobody notices until the month closes.
+by a deduplicator, a brief hour that opens at 08:00 in Tokyo rather than in
+the container's Los Angeles. Every one of those fails *silently* — it produces
+a number, or a message at the wrong hour, and nobody notices until the month
+closes.
 
 A test here is only trusted once it has been run against the code from
 **before** the fix and seen to fail. Two early drafts of one passed against
