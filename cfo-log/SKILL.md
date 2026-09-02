@@ -18,13 +18,26 @@ comes from a field in the JSON.
 ## The call
 
 ```sh
-python3 /opt/data/skills/cfo-shared/scripts/money.py add "<amount>" \
-  --kind expense|income --category <category> --note "<what they said>"
+python3 /opt/data/skills/cfo-shared/scripts/money.py add '<amount>' \
+  --kind expense|income --category <category> --note '<what they said>'
 ```
 
-Pass the amount **as the owner wrote it**. The engine reads `40`, `40,50`,
-`R$ 1.234,56` and `1,234.56` correctly; re-typing it into another format is
-how a comma becomes a decimal point and R$ 1.234,56 becomes R$ 1.23.
+**Single quotes, and digits only in the amount.** Both halves are one lesson,
+learned the expensive way. The owner texted *"I just spent $54.82 on the
+market"*; the call went out as `add "$54.82" --note "I just spent $54.82 on
+the market"`; and the shell expanded `$5` — an unset positional parameter — to
+nothing. R$ 4,82 went into the ledger, with a note that read "I just spent
+4.82 on the market". The amount and the note agreed with each other, so
+nothing after that point could tell. Inside `''` the shell expands nothing,
+and an amount with no symbol has nothing to eat.
+
+Keep the digits **exactly as the owner wrote them** — `40`, `40,50`,
+`1.234,56`, `1,234.56` all read correctly, and re-typing one into another
+format is how a thousands separator becomes a decimal point and R$ 1.234,56
+becomes R$ 1,23. Strip only the currency symbol; `add` refuses one anyway.
+
+If the response carries a `warning`, do not confirm the amount — ask the
+owner about it in one short question first.
 
 `add` returns the new row plus the month's totals. Confirm with those.
 

@@ -193,7 +193,7 @@ agent permanently** — send it from the phone that should own it.
 python3 -m pytest tests/ -q
 ```
 
-123 of them, and the ones that earn their place are the boundary tests: an
+127 of them, and the ones that earn their place are the boundary tests: an
 amount read in the wrong locale (`R$ 1.234,56` vs `1,234.56`), a day resolved
 in the wrong zone, a merchant name matched inside a longer word (`Raia` in
 `PRAIA GRANDE`), four identical bus fares on one afternoon collapsed into one

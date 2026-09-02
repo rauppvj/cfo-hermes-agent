@@ -6,6 +6,7 @@ number, just not the right one, and nobody notices until the month closes
 wrong. Everything else here is arithmetic that would fail loudly anyway.
 """
 
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -387,6 +388,60 @@ def test_yesterday_is_the_owners_yesterday_not_the_utc_one(mod, con):
 def test_a_day_with_nothing_on_it_says_zero_rather_than_nothing(mod, con):
     out = mod.day_totals(con, "2026-06-10")
     assert out["expense"] == 0 and out["count"] == 0 and out["categories"] == []
+
+
+def test_the_shell_eats_a_dollar_amount_inside_double_quotes(mod):
+    """The incident, reproduced against the shell rather than the engine.
+
+    2026-09-02: "I just spent $54.82 on the market" became `add "$54.82"
+    --note "I just spent $54.82 on the market"`. `$5` is an unset positional
+    parameter, so the shell expanded it to nothing -- in BOTH arguments. The
+    process received a self-consistent pair, 4.82 with a note saying 4.82, and
+    no check inside it could have known. R$ 4,82 was recorded for a R$ 54,82
+    purchase.
+
+    This test pins the mechanism, because the fix is not a check: it is that
+    the string never reaches a command line. If this ever stops failing, the
+    two skills' quoting rules can be relaxed.
+    """
+    import subprocess
+    out = subprocess.run(
+        ['sh', '-c', 'printf "%s|%s" "$54.82" "spent $54.82 today"'],
+        capture_output=True, text=True).stdout
+    assert out == "4.82|spent 4.82 today"        # both halves, identically wrong
+
+
+def test_an_amount_with_a_currency_symbol_is_refused(mod):
+    """Refused where it is still visible, to keep it out of argv entirely."""
+    for bad in ("$54.82", "R$ 1.234,56", "€40", "£20", "US$40"):
+        with pytest.raises(SystemExit) as exc:
+            mod.refuse_symbol_in_amount(bad)
+        assert "digits only" in str(exc.value)
+
+    for good in ("54.82", "1.234,56", "40", "40,50", "1,234.56"):
+        mod.refuse_symbol_in_amount(good)        # no raise
+
+
+def test_an_amount_that_is_the_tail_of_the_notes_number_warns(mod):
+    """The mixed case: note single-quoted and intact, amount eaten."""
+    assert mod.note_disagrees("4.82", "I just spent $54.82 on the market") == "54.82"
+    assert mod.note_disagrees("0", "gastei 20 no uber") == "20"
+
+    # and the ordinary log, which must not warn
+    assert mod.note_disagrees("40", "gastei 40 no almoço") is None
+    assert mod.note_disagrees("25", "2 cervejas de 12,50") is None
+    assert mod.note_disagrees("54.82", "I just spent $54.82 on the market") is None
+    assert mod.note_disagrees("40", "almoço") is None
+
+
+def test_the_warning_rides_on_the_row_rather_than_blocking_it(mod, con, capsys):
+    """Written, not refused. A log that fails is worse than a log that asks."""
+    mod.main(["add", "4.82", "--category", "groceries",
+              "--note", "I just spent $54.82 on the market"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["id"] and out["amount_cents"] == 482
+    assert "54.82" in out["warning"]
+    assert "say" in out
 
 
 def test_the_day_still_being_spent_says_so(mod, con):

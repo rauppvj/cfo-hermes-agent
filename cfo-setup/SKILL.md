@@ -50,10 +50,14 @@ python3 $S/money.py config timezone America/Sao_Paulo
 python3 $S/money.py config currency BRL
 
 # --every: monthly (default), weekly, biweekly
-python3 $S/money.py fixed add "salário" "7000" --kind income --day 5
-python3 $S/money.py fixed add "freela" "1500" --kind income --every weekly
-python3 $S/money.py fixed add "aluguel" "1.800,00" --kind expense --day 5
+python3 $S/money.py fixed add 'salário' '7000' --kind income --day 5
+python3 $S/money.py fixed add 'freela' '1500' --kind income --every weekly
+python3 $S/money.py fixed add 'aluguel' '1.800,00' --kind expense --day 5
 ```
+
+**Single quotes, and digits only in an amount.** In `""` the shell expands
+`$7.000` to `.000` and files a salary of three cents — silently, and the row
+looks fine afterwards. See cfo-log for the incident this comes from.
 
 **Pay frequency is not cosmetic.** Someone paid weekly earns 52 weeks a year,
 not 48 — recording a weekly wage as monthly loses them about a month of

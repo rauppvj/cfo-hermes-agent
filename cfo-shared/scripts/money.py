@@ -95,6 +95,61 @@ def parse_amount(raw: str) -> int:
     return -cents if neg else cents
 
 
+CURRENCY_SYMBOL = re.compile(r"[$€£¥R]\s*(?=[\d.,])|[A-Za-z]{2,3}\$")
+AMOUNT_IN_TEXT = re.compile(r"\d[\d.,]*\d|\d")
+
+
+def refuse_symbol_in_amount(raw: str) -> None:
+    """A currency symbol never reaches this argument, and here is why.
+
+    On 2026-09-02 the owner texted "I just spent $54.82 on the market". The
+    agent composed, correctly by its own instructions, `add "$54.82" --note "I
+    just spent $54.82 on the market"` -- and the shell expanded `$5`, an unset
+    positional parameter, to nothing. What ran was `add 4.82`, with a note
+    that read "I just spent 4.82 on the market". R$ 4,82 went into the ledger
+    for a R$ 54,82 purchase, and BOTH halves of the call agreed with each
+    other, so nothing downstream could tell. It was caught because the agent
+    reads the amount back in its confirmation and happened to notice.
+
+    Nothing inside this process can detect that call: by the time argv exists
+    the digits are gone. So the fix is to make the dangerous string never
+    appear in a command line at all. The amount argument carries digits and
+    separators, never a symbol -- and this refusal is what teaches that, on
+    the one path where the symbol is still visible (single-quoted, where it
+    was harmless) rather than in a rule the model reads once.
+
+    The digits themselves are still passed EXACTLY as the owner wrote them:
+    re-typing `1.234,56` into another format is how a thousands separator
+    becomes a decimal point and R$ 1.234,56 becomes R$ 1,23.
+    """
+    if CURRENCY_SYMBOL.search(raw or ""):
+        raise SystemExit(
+            f"the amount argument takes digits only -- {raw!r} carries a "
+            "currency symbol. Strip it and keep the digits exactly as they "
+            "were written (54.82, 1.234,56), and quote arguments with '' "
+            "rather than \"\": inside double quotes the shell eats `$5` and "
+            "$54.82 becomes 4.82, silently and in agreement with itself. "
+            "This is a mistake in the call and not news for the owner: fix "
+            "the command and run it again, say nothing about it.")
+
+
+def note_disagrees(raw_amount: str, note: str) -> str | None:
+    """The note's own number, when the amount looks like a truncation of it.
+
+    The mixed case the refusal above cannot reach: the note single-quoted and
+    intact, the amount double-quoted and eaten. `4.82` is then a proper suffix
+    of the note's `54.82`, which no ordinary log produces -- an amount is not
+    normally the tail of a longer number sitting in the same sentence.
+    """
+    raw = (raw_amount or "").strip()
+    if not raw or not note:
+        return None
+    for token in AMOUNT_IN_TEXT.findall(note):
+        if token != raw and len(token) > len(raw) and token.endswith(raw):
+            return token
+    return None
+
+
 def fmt(cents: int, currency: str = "BRL") -> str:
     sign = "-" if cents < 0 else ""
     whole, frac = divmod(abs(int(cents)), 100)
@@ -864,13 +919,25 @@ def main(argv=None) -> int:
     cur = currency_of(con)
 
     if args.cmd == "add":
+        refuse_symbol_in_amount(args.amount)
         cents = parse_amount(args.amount)
         tid = add_tx(con, cents, args.kind, args.category, args.note, args.source)
         month = now_local(con).strftime("%Y-%m")
-        emit({"id": tid, "amount_cents": cents, "kind": args.kind,
-              "category": args.category, "note": args.note,
-              **{k: v for k, v in month_totals(con, month).items() if k != "month"},
-              "month": month}, cur)
+        row = {"id": tid, "amount_cents": cents, "kind": args.kind,
+               "category": args.category, "note": args.note,
+               **{k: v for k, v in month_totals(con, month).items() if k != "month"},
+               "month": month}
+        bigger = note_disagrees(args.amount, args.note)
+        if bigger:
+            # Written, not refused: a log that fails is worse than a log that
+            # asks. The row can be deleted by id in the next call.
+            row["warning"] = (
+                f"recorded {args.amount}, but the note says {bigger} -- if the "
+                "shell ate a `$`, delete this row and add it again with the "
+                "amount in single quotes")
+            row["say"] = ("check the amount with the owner in one short "
+                          "question before confirming it")
+        emit(row, cur)
 
     elif args.cmd == "summary":
         month = args.month or now_local(con).strftime("%Y-%m")
