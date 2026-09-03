@@ -1084,8 +1084,14 @@ def main(argv=None) -> int:
                              if raw.startswith("@") else raw)
         m.emit(apply(con, Path(args.file).expanduser(), mapping,
                      dry_run=not args.commit, password=args.password), cur)
+        # Ninety days landing at once is the biggest change the panel will
+        # ever show, and the import is the moment someone is watching it. A
+        # dry run changed nothing, so it redraws nothing.
+        if args.commit:
+            m.refresh_panel(con)
     elif args.cmd == "undo":
         m.emit(undo(con, args.batch), cur)
+        m.refresh_panel(con)
     elif args.cmd == "batches":
         m.emit(batches(con), cur)
     elif args.cmd == "detect":

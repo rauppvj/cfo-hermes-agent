@@ -431,6 +431,75 @@ def yesterday_local(con, today=None) -> str:
     return (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def daily_totals(con, month: str, today=None) -> list[dict]:
+    """What each day of `month` cost, zeros included, in the owner's zone.
+
+    Zeros included on purpose: the caller is drawing a shape, and a series
+    that skips the days nothing was spent draws a month with no quiet days in
+    it. A month still running stops at the owner's today rather than padding
+    the future with zeros that would read as days where nothing was spent.
+    """
+    spent = {r["day_local"]: int(r["total"]) for r in con.execute(
+        "SELECT day_local, SUM(amount_cents) AS total FROM tx"
+        " WHERE month_local = ? AND kind = 'expense' GROUP BY day_local",
+        (month,)).fetchall()}
+    today = today or now_local(con)
+    first = datetime.strptime(month + "-01", "%Y-%m-%d")
+    last = (today.day if month == today.strftime("%Y-%m")
+            else days_in_month(first))
+    return [{"day": f"{month}-{d:02d}", "expense": spent.get(f"{month}-{d:02d}", 0)}
+            for d in range(1, last + 1)]
+
+
+def _due_on(year: int, month: int, day_of_month: int) -> datetime:
+    """A fixed line's date in one month, clamped to that month's length.
+
+    Rent on the 31st is still rent in April. Clamping to the 30th keeps it in
+    the month it belongs to; skipping it would drop a bill from the one list
+    whose whole job is that no bill is a surprise.
+    """
+    first = datetime(year, month, 1)
+    return first.replace(day=min(day_of_month, days_in_month(first)))
+
+
+def upcoming_fixed(con, today=None, within_days: int = 7) -> list[dict]:
+    """The recurring lines that fall due within the next `within_days` days.
+
+    This is date arithmetic, which is exactly what the owner's agent may not
+    do: SOUL.md forbids the model any calculation, and "the condominium is
+    due tomorrow" is a subtraction over a month boundary -- on the 29th, a
+    bill on the 6th is eight days away, not minus twenty-three. The brief
+    asked the model to notice that from `status.fixed[].day_of_month` and a
+    date, which is a rule in prose where a field belongs.
+
+    Monthly lines only. `weekly` and `biweekly` store a weekday in
+    `day_of_month` (`fixed add --day 1` means Monday), so reading it as a
+    date would answer confidently and wrongly -- the failure mode this whole
+    engine exists to prevent.
+    """
+    today = today or now_local(con)
+    rows = con.execute(
+        "SELECT id, label, amount_cents, kind, day_of_month FROM fixed"
+        " WHERE active = 1 AND frequency = 'monthly'").fetchall()
+
+    out = []
+    for r in rows:
+        day = int(r["day_of_month"])
+        due = _due_on(today.year, today.month, day)
+        if due.date() < today.date():
+            nxt = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+            due = _due_on(nxt[0], nxt[1], day)
+        away = (due.date() - today.date()).days
+        if away <= within_days:
+            out.append({
+                "id": r["id"], "label": r["label"],
+                "amount_cents": int(r["amount_cents"]), "kind": r["kind"],
+                "due": due.strftime("%Y-%m-%d"), "due_day": due.day,
+                "days_away": away,
+            })
+    return sorted(out, key=lambda d: (d["days_away"], -d["amount_cents"]))
+
+
 def by_category(con, month: str, kind: str = "expense") -> list[dict]:
     rows = con.execute(
         "SELECT category, SUM(amount_cents) AS total, COUNT(*) AS n FROM tx"
@@ -819,6 +888,39 @@ def recent(con, limit: int = 20) -> list[dict]:
 
 
 # --------------------------------------------------------------------------
+# the panel: a second surface, kept current by whoever changes the ledger
+# --------------------------------------------------------------------------
+
+# Commands that change what the panel would say. `config` is in the list
+# because timezone and currency decide which day a figure belongs to and how
+# every number on the page is printed; `merchants --forget` is, because it
+# moves spending between categories.
+PANEL_REFRESH = {"add", "delete", "recategorize", "fixed", "config", "merchants"}
+
+
+def refresh_panel(con) -> None:
+    """Rewrite the wall panel, and never let that fail a ledger write.
+
+    The ledger is the product and the panel is a view of it. If rendering
+    ever breaks -- a font-sized mistake in a template, a full disk, a path
+    that is not writable in some install nobody tested -- the correct
+    outcome is a stale page and a logged warning, not a refused `money add`
+    and an owner who is told their lunch could not be recorded.
+
+    Two hard rules, both about the calling contract rather than the panel:
+    nothing is printed to STDOUT (a skill parses that as the command's JSON),
+    and nothing propagates (`add` has already committed by the time this
+    runs).
+    """
+    try:
+        import panel                             # local: panel imports money
+        panel.write(con)
+    except Exception as exc:                     # noqa: BLE001
+        print(f"warning: panel not refreshed: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+
+
+# --------------------------------------------------------------------------
 # CLI -- every subcommand prints JSON, so the skill reads fields, not prose
 # --------------------------------------------------------------------------
 
@@ -876,6 +978,8 @@ def main(argv=None) -> int:
 
     sub.add_parser("project", help="project this month's close at the current pace")
     sub.add_parser("status", help="where this person stands and what is missing")
+    up = sub.add_parser("upcoming", help="fixed lines falling due in the next days")
+    up.add_argument("--days", type=int, default=7)
     u = sub.add_parser("uncategorized",
                        help="merchants the rules could not place, worst first")
     u.add_argument("--limit", type=int, default=40)
@@ -954,6 +1058,9 @@ def main(argv=None) -> int:
     elif args.cmd == "status":
         emit({**status(con), "currency": cur}, cur)
 
+    elif args.cmd == "upcoming":
+        emit(upcoming_fixed(con, within_days=args.days), cur)
+
     elif args.cmd == "uncategorized":
         emit(uncategorized(con, args.limit), cur)
 
@@ -1024,6 +1131,11 @@ def main(argv=None) -> int:
             rows = con.execute("SELECT key, value FROM config ORDER BY key").fetchall()
             emit({r["key"]: r["value"] for r in rows})
 
+    # Last, and after emit(): the ledger has already answered by the time the
+    # second surface is redrawn, so a slow or broken panel cannot delay -- or
+    # corrupt -- the JSON a skill is waiting on.
+    if args.cmd in PANEL_REFRESH:
+        refresh_panel(con)
     return 0
 
 

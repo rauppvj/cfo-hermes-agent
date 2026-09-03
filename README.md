@@ -85,6 +85,8 @@ python3 cfo-shared/scripts/money.py day             # yesterday, one number
 python3 cfo-shared/scripts/money.py summary
 python3 cfo-shared/scripts/money.py project
 python3 cfo-shared/scripts/money.py simulate "1,200.00" --installments 3
+
+open /tmp/cfo-try/panel/index.html                  # the same month, as a screen
 ```
 
 The sample data is **deterministic per month**: three completed months seeded
@@ -93,6 +95,109 @@ demo video, plus the current month filled in up to today — because a sample
 whose current month is empty cannot answer the first question anyone asks it.
 Seeded rows are marked `source: demo`, and `seed_demo.py --reset` removes them
 while leaving anything you logged yourself untouched.
+
+## The panel: the second surface
+
+The chat answers when you ask it something. A screen you walk past answers
+before you ask — so the same ledger also renders as one page:
+
+    ~/.hermes-cfo/cfo/panel/index.html
+
+Open it by double click, put it full-screen on a spare monitor or an old
+iPad, and it shows the month's spend, where it closes at the current pace,
+today and yesterday, the categories, and the bills due in the next seven
+days. It reloads itself every minute; **every write to the ledger redraws
+it**, so a spend texted from the sofa is on the kitchen screen before the
+reply arrives.
+
+**No model writes any figure on that page.** `panel.py` renders it from the
+same functions `money.py` prints from — which is also why it shows no
+projection in the first days of a month: `basis.usable` is false, and a
+number nobody is reading is the worst place to guess. And nothing on the page
+is fetched from anywhere: no CDN, no font, no script. It is a file on your
+disk, opened over `file://`, with no server and no port — the same promise
+the ledger makes.
+
+<details>
+<summary>Where it comes from, and how to move it</summary>
+
+Redraw it by hand — after editing anything, or just to see it work:
+
+```sh
+python3 cfo-shared/scripts/panel.py            # writes $CFO_DATA/panel/index.html
+python3 cfo-shared/scripts/panel.py --json     # the same figures, as data
+CFO_PANEL=~/Desktop/cfo.html python3 cfo-shared/scripts/panel.py
+```
+
+A `cfo-panel` cron row keeps it current when nobody is texting: `no_agent`,
+so the scheduler runs the script and never wakes the model — no tokens, no
+message, ten minutes apart. That tick is not redundant with the write hook:
+at midnight "today" becomes a different day on a page nobody has touched.
+
+The language follows `money.py config language pt|en`, and without that
+setting it follows the currency.
+</details>
+
+## Usage, and the Agent Index
+
+This agent is published on the [Agent Index](https://aiworthusing.com/agent-index)
+as `cfo`, and each install can report **how much it ran** — token counts per
+day per model, through
+[`plow-pbc/agent-index-client`](https://github.com/plow-pbc/agent-index-client),
+one file of standard-library Python that lands in your own home at
+`~/.hermes-<name>/scripts/agent_index_client.py`.
+
+**What it does not send: anything else.** No prompts, no messages, no
+transactions, no totals, no file paths, no costs. Your ledger is not part of
+it and never leaves the machine. The installer asks before signing in, and
+skipping it changes nothing about how the agent works.
+
+The credential is yours: your GitHub approves it, it is stored in your home,
+and nothing is baked into the repo. Sign in later, or stop:
+
+```sh
+C=~/.hermes-cfo/scripts/agent_index_client.py
+docker exec -it hermes-cfo env HOME=/opt/data python3 $C --agent cfo --login
+docker exec hermes-cfo env HOME=/opt/data python3 $C --agent cfo --dry-run
+
+rm ~/.hermes-cfo/.agent-index/token     # stop reporting, keep the agent
+```
+
+Reporting starts at the **first run**: the client records a baseline and
+sends the difference from then on, so nothing before it is counted — by
+design, so a long-lived session cannot dump weeks of history onto one day.
+
+<details>
+<summary>How it is wired, and the two variables that decide whether it works</summary>
+
+An hourly `cfo-usage` cron row runs
+[`usage_report.sh`](cfo-shared/scripts/usage_report.sh) with `no_agent` — the
+script is the job, so no model wakes up and nothing is delivered to the chat.
+The wrapper exists for two environment variables:
+
+- **`HOME=/opt/data`** — the client keeps the credential at
+  `~/.agent-index/token` and its collection baseline next to it. The container
+  runs with `HOME=/root`, which is the image's own layer, and every
+  `agent-mgr deploy` recreates the container: both files would vanish, the
+  credential silently.
+- **`HERMES_HOME=/opt/data`** — where `state.db` is. A wrong path is not an
+  error; it reads as **zero tokens**, which on a public index looks like an
+  agent nobody uses rather than one nobody configured.
+
+Publishing the agent itself is a separate, one-time act by whoever owns the
+id — `--register` claims it and cannot be undone, so it is not part of any
+install:
+
+```sh
+python3 agent_index_client.py --register --agent cfo \
+  --name "cfo" \
+  --blurb "A financial manager you text. Log what you spend in plain language, ask where the month is heading — the ledger stays a file on your own Mac." \
+  --repo https://github.com/rauppvj/cfo-hermes-agent \
+  --runtime "Hermes / Plow" \
+  --builder-name "Vinicius Raupp" --builder-handle @rauppvj \
+  --image https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/panel.png
+```
+</details>
 
 ## Start from the statement, not from typing
 
@@ -211,6 +316,7 @@ agent permanently** — send it from the phone that should own it.
 | [`cfo-brief`](cfo-brief/SKILL.md) | the morning and evening briefs — the only times it speaks first |
 | [`cfo-setup`](cfo-setup/SKILL.md) | first run: timezone, currency, fixed lines, sample data |
 | [`cfo-import`](cfo-import/SKILL.md) | reads a bank statement or card invoice off the owner's Mac |
+| [`cfo-panel`](cfo-panel/SKILL.md) | the wall panel — where it is, how to refresh it, how to open it |
 
 ## Tests
 

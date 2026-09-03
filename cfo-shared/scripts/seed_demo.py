@@ -155,6 +155,10 @@ def main(argv=None) -> int:
 
     result = reset(con) if args.reset else seed(con, args.months)
     m.emit(result, m.currency_of(con))
+    # So the panel exists before anyone has logged anything real -- the demo
+    # ledger is what the README's one-minute try renders, and a blank page is
+    # a worse answer than a sample clearly marked as one.
+    m.refresh_panel(con)
     return 0
 
 

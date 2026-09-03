@@ -6,5 +6,19 @@
     "prompt": "Run the cfo-brief skill and send the brief named in the script output above. If there is nothing worth reporting, send nothing rather than padding it.",
     "skills": ["cfo-brief"],
     "deliver": "plow_chat:${PLOW_HOME_CHANNEL}"
+  },
+  {
+    "name": "cfo-panel",
+    "schedule": "*/10 * * * *",
+    "script": "panel.py",
+    "no_agent": true,
+    "deliver": "local"
+  },
+  {
+    "name": "cfo-usage",
+    "schedule": "17 * * * *",
+    "script": "usage_report.sh",
+    "no_agent": true,
+    "deliver": "local"
   }
 ]

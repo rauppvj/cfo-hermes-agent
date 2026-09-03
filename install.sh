@@ -103,7 +103,10 @@ else
     skip "already registered"
 fi
 
-HOME_DIR="$(agent-mgr --json resolve "$NAME" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['home'])")"
+RESOLVED="$(agent-mgr --json resolve "$NAME")"
+resolved_field() { printf '%s' "$RESOLVED" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['$1'])"; }
+HOME_DIR="$(resolved_field home)"
+CONTAINER="$(resolved_field container)"
 DOTENV="$HOME_DIR/.env"
 
 step "Deploying"
@@ -143,9 +146,22 @@ step "Starting the container"
 AGENT_TRANSITION_ACK=1 agent-mgr up "$NAME"
 ok "running"
 
-step "Registering the brief"
+step "Registering the brief and the panel"
 agent-mgr cron-sync "$NAME"
 ok "hourly tick; the gate opens it at your own 08:00 and 22:00"
+ok "the panel redraws every ten minutes, without waking the model"
+
+# Render it once now, so there is something to open before the first message
+# -- but only over a ledger that exists. On a fresh install the container has
+# not created one yet, and making it here from the host is how two processes
+# end up disagreeing about who owns the file.
+PANEL="$HOME_DIR/cfo/panel/index.html"
+if [ -f "$HOME_DIR/cfo/ledger.db" ]; then
+    CFO_DATA="$HOME_DIR/cfo" python3 "$REPO/cfo-shared/scripts/panel.py" 2>/dev/null \
+        && ok "panel at $PANEL"
+else
+    skip "panel appears at $PANEL after your first message"
+fi
 
 step "Signing in to the model provider"
 if [ -s "$HOME_DIR/auth.json" ]; then
@@ -155,6 +171,47 @@ else
     echo "    A device code follows. Open the URL, enter the code, come back."
     agent-mgr sign-in "$NAME"
     ok "signed in"
+fi
+
+# --------------------------------------------------------------------------
+# 4b. Counting this install on the Agent Index -- optional, and asked plainly
+# --------------------------------------------------------------------------
+#
+# The credential is per INSTALL and belongs to the person installing: their
+# GitHub approves it, it is stored in their own home, and it is what makes
+# this instance count as one install of `cfo` rather than as nobody. It is
+# never baked into anything -- see the client's own README on exactly that.
+step "Reporting usage to the Agent Index (optional)"
+
+if [ -f "$HOME_DIR/.agent-index/token" ]; then
+    skip "already signed in -- usage is being reported hourly"
+elif [ ! -f "$HOME_DIR/scripts/agent_index_client.py" ]; then
+    skip "no client on this machine -- the deploy could not fetch it; re-run 'agent-mgr deploy $NAME'"
+elif [ ! -t 0 ]; then
+    skip "no terminal -- skipping; the agent works the same, nothing is reported"
+else
+    cat <<'TXT'
+    This agent is published on the AI Worth Using Agent Index, and installs
+    are counted there. Signing in reports HOW MUCH the agent ran -- token
+    counts per day, per model.
+
+    It does NOT send your ledger, your transactions, your prompts, or
+    anything you text the agent. The client is one readable file:
+    ~/.hermes-<name>/scripts/agent_index_client.py
+
+    Skip it and everything works exactly the same.
+
+TXT
+    read -r -p "    Sign in and report usage? [y/N] " answer
+    case "$answer" in
+        [yY]*)
+            docker exec -it "$CONTAINER" env HOME=/opt/data python3 \
+                /opt/data/scripts/agent_index_client.py --agent cfo --login \
+                && ok "signed in -- this install now counts" \
+                || skip "sign-in did not complete; re-run ./install.sh $NAME to try again"
+            ;;
+        *) skip "skipped -- nothing is reported" ;;
+    esac
 fi
 
 # --------------------------------------------------------------------------
@@ -206,6 +263,13 @@ $(bold "Installed.") Text your agent from the phone you activated with:
 It will ask what city you are in. That answer sets the timezone for
 everything, including the hour your brief arrives -- 08:00 and 22:00 where
 you live, wherever that is.
+
+The same month is also a page on this Mac, redrawn on every change:
+
+    open $HOME_DIR/cfo/panel/index.html
+
+Put it full-screen on a spare monitor or an old tablet and it stays current
+on its own.
 
     agent-mgr logs $NAME          follow it
     agent-mgr restart $NAME       after changing anything in this checkout

@@ -26,9 +26,43 @@ set -eu
 : "${AGENT_HOME:?deploy hook needs AGENT_HOME -- agent-mgr sets it}"
 
 mkdir -p "$AGENT_HOME/scripts"
-cp cfo-shared/scripts/brief_gate.py "$AGENT_HOME/scripts/brief_gate.py"
-chmod 0644 "$AGENT_HOME/scripts/brief_gate.py"
-echo "deployed brief_gate.py to $AGENT_HOME/scripts"
+for f in brief_gate.py panel.py usage_report.sh; do
+    cp "cfo-shared/scripts/$f" "$AGENT_HOME/scripts/$f"
+    chmod 0644 "$AGENT_HOME/scripts/$f"
+done
+echo "deployed brief_gate.py, panel.py and usage_report.sh to $AGENT_HOME/scripts"
+
+# The Agent Index client, which usage_report.sh runs. Fetched rather than
+# vendored: it is somebody else's file, MIT, one script of standard-library
+# Python, and a copy committed here would go stale silently while looking
+# current. Fetched ONCE -- a re-download on every deploy would change the
+# reporting code under a running instance with no version to point at when it
+# behaves differently. Delete the file and deploy again to update it.
+#
+# Never fatal. An instance whose owner never signs in reports nothing and
+# works exactly as well; a network hiccup here must not fail a deploy.
+CLIENT="$AGENT_HOME/scripts/agent_index_client.py"
+CLIENT_URL="https://raw.githubusercontent.com/plow-pbc/agent-index-client/main/standalone/agent_index_client.py"
+if [ -f "$CLIENT" ]; then
+    echo "agent-index client already at $CLIENT"
+elif curl -fsSL "$CLIENT_URL" -o "$CLIENT.tmp" 2>/dev/null; then
+    # Downloaded to a temp name and renamed, so an interrupted fetch cannot
+    # leave a half-file that then never re-downloads (the check above would
+    # find it and skip).
+    mv "$CLIENT.tmp" "$CLIENT"
+    chmod 0644 "$CLIENT"
+    echo "fetched the agent-index client to $CLIENT"
+else
+    rm -f "$CLIENT.tmp"
+    echo "could not fetch the agent-index client -- usage will not be reported."
+    echo "  retry with: agent-mgr deploy <name>, or curl it yourself:"
+    echo "  curl -fsSL $CLIENT_URL -o $CLIENT"
+fi
+
+# Both are cron scripts and both are copies for the reason above; neither
+# holds state. panel.py reads the ledger and the language setting at run time
+# exactly as the gate reads the owner's hours, so a copy left over from an
+# older deploy renders the current month from the current data.
 
 # Match the latch declaration to whether this instance actually has a Latch.
 #

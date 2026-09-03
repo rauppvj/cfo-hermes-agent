@@ -33,8 +33,14 @@ S=/opt/data/skills/cfo-shared/scripts
 python3 $S/money.py day            # YESTERDAY -- the first sentence
 python3 $S/money.py project        # pace, projected close, fixed lines
 python3 $S/money.py summary        # month to date, by category
+python3 $S/money.py upcoming       # what falls due, with days_away
 python3 $S/money.py recent --limit 10
 ```
+
+`upcoming` is the only source for "a bill lands this week". Do not work it
+out from `status.fixed[].day_of_month` and today's date: on the 29th, a bill
+on the 6th is seven days away, not minus twenty-three, and that subtraction
+is arithmetic — which you do not do. Read `days_away`.
 
 `day` defaults to yesterday in the owner's zone and is the only source for
 the opening figure. Run it first; without it there is no honest way to say
@@ -79,6 +85,7 @@ while they still remember it.
 S=/opt/data/skills/cfo-shared/scripts
 python3 $S/money.py day --today    # TODAY so far -- partial: true
 python3 $S/money.py project
+python3 $S/money.py upcoming --days 1   # due tomorrow: days_away == 1
 python3 $S/money.py recent --limit 10
 ```
 
