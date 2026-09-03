@@ -35,34 +35,35 @@ echo "deployed brief_gate.py, panel.py and usage_report.sh to $AGENT_HOME/script
 # The Agent Index client, which usage_report.sh runs. Fetched rather than
 # vendored: it is somebody else's file, MIT, one script of standard-library
 # Python, and a copy committed here would go stale silently while looking
-# current. Fetched ONCE -- a re-download on every deploy would change the
-# reporting code under a running instance with no version to point at when it
-# behaves differently. Delete the file and deploy again to update it.
+# current.
 #
-# Never fatal. An instance whose owner never signs in reports nothing and
-# works exactly as well; a network hiccup here must not fail a deploy.
+# RE-FETCHED ON EVERY DEPLOY, which is not the cautious choice and is the
+# right one this month. It was fetch-once until 2026-09-03, when upstream
+# replaced the whole identity model mid-hackathon -- GitHub device flow out,
+# the container's Plow token in -- and the index stopped accepting the old
+# credentials the same day. A pinned copy does not fail loudly there: it
+# reports 401 to a log nobody reads and the agent sits on a public leaderboard
+# at zero. Following upstream costs a review; not following it cost the only
+# metric that counts.
+#
+# Never fatal, and never clobbers what works: a failed download leaves the
+# existing client in place rather than truncating it.
 CLIENT="$AGENT_HOME/scripts/agent_index_client.py"
 CLIENT_URL="https://raw.githubusercontent.com/plow-pbc/agent-index-client/main/standalone/agent_index_client.py"
-if [ -f "$CLIENT" ]; then
-    echo "agent-index client already at $CLIENT"
-elif curl -fsSL "$CLIENT_URL" -o "$CLIENT.tmp" 2>/dev/null; then
-    # Downloaded to a temp name and renamed, so an interrupted fetch cannot
-    # leave a half-file that then never re-downloads (the check above would
-    # find it and skip).
+if curl -fsSL "$CLIENT_URL" -o "$CLIENT.tmp" 2>/dev/null && [ -s "$CLIENT.tmp" ]; then
     mv "$CLIENT.tmp" "$CLIENT"
     chmod 0644 "$CLIENT"
     echo "fetched the agent-index client to $CLIENT"
 else
     rm -f "$CLIENT.tmp"
-    echo "could not fetch the agent-index client -- usage will not be reported."
-    echo "  retry with: agent-mgr deploy <name>, or curl it yourself:"
-    echo "  curl -fsSL $CLIENT_URL -o $CLIENT"
+    if [ -f "$CLIENT" ]; then
+        echo "could not re-fetch the agent-index client -- keeping the copy already here"
+    else
+        echo "could not fetch the agent-index client -- usage will not be reported."
+        echo "  retry with: agent-mgr deploy <name>, or curl it yourself:"
+        echo "  curl -fsSL $CLIENT_URL -o $CLIENT"
+    fi
 fi
-
-# Both are cron scripts and both are copies for the reason above; neither
-# holds state. panel.py reads the ledger and the language setting at run time
-# exactly as the gate reads the owner's hours, so a copy left over from an
-# older deploy renders the current month from the current data.
 
 # Match the latch declaration to whether this instance actually has a Latch.
 #

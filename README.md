@@ -149,62 +149,69 @@ setting it follows the currency.
 ## Usage, and the Agent Index
 
 This agent is published on the [Agent Index](https://aiworthusing.com/agent-index)
-as `cfo`, and each install can report **how much it ran** — token counts per
-day per model, through
+as `cfo`, and each install reports **how much it ran** — token counts per day
+per model, through
 [`plow-pbc/agent-index-client`](https://github.com/plow-pbc/agent-index-client),
 one file of standard-library Python that lands in your own home at
 `~/.hermes-<name>/scripts/agent_index_client.py`.
 
 **What it does not send: anything else.** No prompts, no messages, no
 transactions, no totals, no file paths, no costs. Your ledger is not part of
-it and never leaves the machine. The installer asks before signing in, and
-skipping it changes nothing about how the agent works.
+it and never leaves the machine.
 
-The credential is yours: your GitHub approves it, it is stored in your home,
-and nothing is baked into the repo. Sign in later, or stop:
+**There is nothing to sign in to.** Identity is this container's own Plow
+token, which the index resolves by asking Plow. No second account, no device
+flow. Turn it off whenever you like — the agent works exactly the same:
 
 ```sh
-C=~/.hermes-cfo/scripts/agent_index_client.py
-docker exec -it hermes-cfo env HOME=/opt/data python3 $C --agent cfo --login
-docker exec hermes-cfo env HOME=/opt/data python3 $C --agent cfo --dry-run
-
-rm ~/.hermes-cfo/.agent-index/token     # stop reporting, keep the agent
+docker exec hermes-cfo python3 /opt/data/skills/cfo-shared/scripts/money.py \
+    config usage_reporting off
 ```
 
-Reporting starts at the **first run**: the client records a baseline and
-sends the difference from then on, so nothing before it is counted — by
-design, so a long-lived session cannot dump weeks of history onto one day.
+Reporting starts at the **first run**: the client records a baseline and sends
+the difference from then on, so nothing before it is counted — by design, so a
+long-lived session cannot dump weeks of history onto one day.
 
 <details>
-<summary>How it is wired, and the two variables that decide whether it works</summary>
+<summary>How it is wired, and the three things that decide whether it works</summary>
 
 An hourly `cfo-usage` cron row runs
 [`usage_report.sh`](cfo-shared/scripts/usage_report.sh) with `no_agent` — the
 script is the job, so no model wakes up and nothing is delivered to the chat.
-The wrapper exists for two environment variables:
+Its output goes to `~/.hermes-<name>/logs/agent-index.log`, which is the only
+place a `deliver: local` job leaves a trace you can read.
 
-- **`HOME=/opt/data`** — the client keeps the credential at
-  `~/.agent-index/token` and its collection baseline next to it. The container
-  runs with `HOME=/root`, which is the image's own layer, and every
-  `agent-mgr deploy` recreates the container: both files would vanish, the
-  credential silently.
+- **`PLOW_AGENT_TOKEN`** — the credential and the whole identity. The gateway
+  loads it from the home's `.env` at boot, so **a scheduled run inherits it and
+  a `docker exec` session does not**. Testing by hand looks unconfigured; the
+  scheduled run is the one that counts.
+- **`HOME=/opt/data`** — where the client keeps its collection baseline. The
+  container's own `HOME` is `/root`, in the image layer that every
+  `agent-mgr deploy` recreates.
 - **`HERMES_HOME=/opt/data`** — where `state.db` is. A wrong path is not an
   error; it reads as **zero tokens**, which on a public index looks like an
   agent nobody uses rather than one nobody configured.
 
-Publishing the agent itself is a separate, one-time act by whoever owns the
-id — `--register` claims it and cannot be undone, so it is not part of any
-install:
+Publishing the agent itself is a one-time act by whoever owns the id, and now
+needs no account of any kind — the container's token is the proof:
 
 ```sh
-python3 agent_index_client.py --register --agent cfo \
+python3 agent_index_client.py --agent cfo --register \
   --name "cfo" \
   --blurb "A financial manager you text. Log what you spend in plain language, ask where the month is heading — the ledger stays a file on your own Mac." \
   --repo https://github.com/rauppvj/cfo-hermes-agent \
   --runtime "Hermes / Plow" \
   --builder-name "Vinicius Raupp" --builder-handle @rauppvj \
-  --image https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/panel.png
+  --image https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/chat-and-panel.png
 ```
+
+> **The identity model changed under this repo on 2026-09-03.** It was a GitHub
+> account proven by device flow; it is now the container's Plow token, and the
+> index stopped accepting the old keys — and dropped every registration made
+> under them — the same day. If reporting is silently at zero, that class of
+> break is the first thing to check: read the log above, and re-fetch the
+> client (`rm ~/.hermes-<name>/scripts/agent_index_client.py`, then
+> `agent-mgr deploy <name>`).
 </details>
 
 ## Start from the statement, not from typing

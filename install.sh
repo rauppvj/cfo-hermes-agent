@@ -174,45 +174,35 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# 4b. Counting this install on the Agent Index -- optional, and asked plainly
+# 4b. Counting this install on the Agent Index
 # --------------------------------------------------------------------------
 #
-# The credential is per INSTALL and belongs to the person installing: their
-# GitHub approves it, it is stored in their own home, and it is what makes
-# this instance count as one install of `cfo` rather than as nobody. It is
-# never baked into anything -- see the client's own README on exactly that.
-step "Reporting usage to the Agent Index (optional)"
+# There is nothing to sign in to. Identity is this container's own Plow token,
+# which the index resolves by asking Plow -- so the scheduled job just works,
+# and the only thing left to do here is SAY SO, because reporting that starts
+# without being announced is reporting nobody agreed to.
+#
+# (Until 2026-09-03 this step ran a GitHub device flow. Upstream replaced it
+# mid-hackathon and the index stopped accepting the keys it minted the same
+# day. A step that asks for a credential nothing accepts is worse than no
+# step, so it is gone rather than left to fail politely.)
+step "Reporting usage to the Agent Index"
 
-if [ -f "$HOME_DIR/.agent-index/token" ]; then
-    skip "already signed in -- usage is being reported hourly"
-elif [ ! -f "$HOME_DIR/scripts/agent_index_client.py" ]; then
-    skip "no client on this machine -- the deploy could not fetch it; re-run 'agent-mgr deploy $NAME'"
-elif [ ! -t 0 ]; then
-    skip "no terminal -- skipping; the agent works the same, nothing is reported"
-else
-    cat <<'TXT'
-    This agent is published on the AI Worth Using Agent Index, and installs
-    are counted there. Signing in reports HOW MUCH the agent ran -- token
-    counts per day, per model.
+cat <<TXT
+    This agent is published on the AI Worth Using Agent Index, and installs are
+    counted there. The hourly job reports HOW MUCH it ran -- token counts per
+    day, per model. It does NOT send your ledger, your transactions, your
+    prompts, or anything you text the agent.
 
-    It does NOT send your ledger, your transactions, your prompts, or
-    anything you text the agent. The client is one readable file:
-    ~/.hermes-<name>/scripts/agent_index_client.py
+    The client is one readable file:
+        $HOME_DIR/scripts/agent_index_client.py
 
-    Skip it and everything works exactly the same.
+    To turn it off, now or later -- the agent works exactly the same either way:
+        docker exec $CONTAINER python3 /opt/data/skills/cfo-shared/scripts/money.py \\
+            config usage_reporting off
 
 TXT
-    read -r -p "    Sign in and report usage? [y/N] " answer
-    case "$answer" in
-        [yY]*)
-            docker exec -it "$CONTAINER" env HOME=/opt/data python3 \
-                /opt/data/scripts/agent_index_client.py --agent cfo --login \
-                && ok "signed in -- this install now counts" \
-                || skip "sign-in did not complete; re-run ./install.sh $NAME to try again"
-            ;;
-        *) skip "skipped -- nothing is reported" ;;
-    esac
-fi
+ok "hourly, from this container's own Plow token -- no account, no sign-in"
 
 # --------------------------------------------------------------------------
 # 5. Latch -- optional, and asked for last on purpose
