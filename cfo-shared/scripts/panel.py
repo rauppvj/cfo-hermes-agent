@@ -102,7 +102,7 @@ LANGUAGES = {
         "nothing_logged": "nada registrado",
         "categories": "categorias do mês",
         "upcoming": "vence em %d dias",
-        "day_of_month": "dia %d",
+        "day_of_month": "dia %s",
         "tomorrow": "amanhã",
         "due_today": "hoje",
         "nothing_due": "nada nos próximos %d dias",
@@ -135,7 +135,11 @@ LANGUAGES = {
         "nothing_logged": "nothing logged",
         "categories": "categories this month",
         "upcoming": "due within %d days",
-        "day_of_month": "the %dth",
+        # "%s" and the ordinal below, never "the %dth": rent on the 1st read
+        # "the 1th" on a wall for a month. English is the language the hosts
+        # of the index install in, so this is the copy a stranger meets first.
+        "day_of_month": "the %s",
+        "ordinal_days": True,
         "tomorrow": "tomorrow",
         "due_today": "today",
         "nothing_due": "nothing due in the next %d days",
@@ -386,12 +390,22 @@ def _spark(days: list[dict], today_index: int, total_days: int) -> str:
             f' role="img" aria-hidden="true">{"".join(bars)}</svg>')
 
 
+def _ordinal(n: int) -> str:
+    """1st, 2nd, 3rd, 4th -- and 11th, 12th, 13th, which are the ones that
+    catch a naive rule out."""
+    if 11 <= n % 100 <= 13:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+
+
 def _when(due: dict, words: dict) -> str:
     if due["days_away"] == 0:
         return words["due_today"]
     if due["days_away"] == 1:
         return words["tomorrow"]
-    return words["day_of_month"] % due["due_day"]
+    day = due["due_day"]
+    return words["day_of_month"] % (_ordinal(day) if words.get("ordinal_days")
+                                    else day)
 
 
 def render(snap: dict) -> str:

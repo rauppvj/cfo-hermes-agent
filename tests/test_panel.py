@@ -287,3 +287,25 @@ def test_language_follows_the_setting_over_the_currency(mods, con):
     money.set_cfg(con, "currency", "USD")
     money.set_cfg(con, "language", "")
     assert panel.language(con) == "en"           # inferred, no setting
+
+
+def test_english_bill_days_are_ordinals_not_the_1th(mods, con):
+    """"the 1th" on a wall for a month.
+
+    The English string was "the %dth", which is right for 4 through 20 and
+    wrong for every other day -- and the day it is most wrong on is the 1st,
+    which is when rent falls due. English is what the index's hosts install
+    in, so this is the copy a stranger meets first.
+    """
+    money, panel = mods
+    money.main(["config", "language", "en"])
+    for day, want in [(1, "the 1st"), (2, "the 2nd"), (3, "the 3rd"),
+                      (4, "the 4th"), (11, "the 11th"), (12, "the 12th"),
+                      (13, "the 13th"), (21, "the 21st"), (22, "the 22nd"),
+                      (23, "the 23rd")]:
+        words = panel.LANGUAGES["en"]
+        assert panel._when({"days_away": 5, "due_day": day}, words) == want
+
+    # Portuguese says the day plainly and must not gain a suffix.
+    assert panel._when({"days_away": 5, "due_day": 21},
+                       panel.LANGUAGES["pt"]) == "dia 21"
