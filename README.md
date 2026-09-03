@@ -11,22 +11,30 @@ your own Mac through [Plow Latch](https://plow.co/latch). Deployed with
 [`plow-pbc/agent-mgr`](https://github.com/plow-pbc/agent-mgr).
 
 ```
-you   gastei 40 no almoço
-cfo   Anotado: R$ 40,00 em alimentação. Você está em R$ 512,00 esse mês.
+you   spent 40 on lunch
+cfo   Recorded: $40.00 on food. You're at $512.00 this month.
 
-you   posso comprar um monitor de 2 mil?
-cfo   Cabe, mas o mês fecha em R$ 300,00 no vermelho no ritmo atual.
-      Em 3x cabe folgado — R$ 666,68 agora e mais duas de R$ 666,66.
+you   can I afford a 2,000 monitor?
+cfo   It fits, but the month closes $300.00 in the red at this pace.
+      Split in 3 it fits comfortably — $666.68 now and two of $666.66.
 
-08:00 Bom dia. Ontem R$ 87,00. No ritmo atual setembro fecha em
-      R$ 3.240,00, R$ 400,00 acima do previsto. Alimentação já passou
-      o mês inteiro de agosto.
+08:00 Morning. Yesterday $87.00. At this pace September closes at
+      $3,240.00, $400.00 over plan. Food has already passed the whole
+      of August.
 
-22:00 Hoje até agora R$ 132,40. Amanhã vence o condomínio, R$ 420,00.
+22:00 $132.40 so far today. The condo fee is due tomorrow, $420.00.
 ```
 
 Both at those hours **where you live** — and the evening one only when the day
 gave it something to say.
+
+It answers in the language you text it in, in the currency you set. The same
+agent, from the same install:
+
+```
+you   gastei 40 no almoço
+cfo   Anotado: R$ 40,00 em alimentação. Você está em R$ 512,00 esse mês.
+```
 
 > [!IMPORTANT]
 > **This repo is code only.** Nothing under this tree may carry a credential,
@@ -46,7 +54,7 @@ own home, and their own ledger, from this one checkout.
 
 **The model reads, the code calculates.**
 
-Hermes turns *"gastei 40 no almoço"* into a `money add` call and reads the
+Hermes turns *"spent 40 on lunch"* into a `money add` call and reads the
 fields that come back. It never does the arithmetic. A language model that
 sums a column of numbers will one day sum it wrong and say so with exactly
 the same confidence — and in a budget, a number that is quietly wrong is
@@ -298,7 +306,7 @@ in the chat, and that is the only place the zone lives:
 > which agent-mgr defaults to `America/Los_Angeles` for the whole fleet, so a
 > `0 8 * * *` brief reaches Tokyo at midnight and nothing anywhere reports it.
 >
-> Change the hour by asking: *"me manda o resumo às 7"* → `money.py config
+> Change the hour by asking: *"send me the brief at 7"* → `money.py config
 > brief_hour 7`, or `off` to stop it. The setter refuses anything that is not
 > an hour, because a schedule that is quietly broken and one that is working
 > look exactly alike.

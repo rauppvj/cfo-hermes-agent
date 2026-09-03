@@ -256,9 +256,11 @@ cat <<TXT
 
 $(bold "Installed.") Text your agent from the phone you activated with:
 
-    "oi"                          it will offer to set you up in 30 seconds
-    "gastei 40 no almoço"         or just start logging and set up later
-    "posso comprar um monitor?"   what a purchase does to the month
+    "hi"                          it will offer to set you up in 30 seconds
+    "spent 40 on lunch"           or just start logging and set up later
+    "can I afford a monitor?"     what a purchase does to the month
+
+It replies in whatever language you write to it in.
 
 It will ask what city you are in. That answer sets the timezone for
 everything, including the hour your brief arrives -- 08:00 and 22:00 where
