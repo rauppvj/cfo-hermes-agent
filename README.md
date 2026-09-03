@@ -159,9 +159,11 @@ one file of standard-library Python that lands in your own home at
 transactions, no totals, no file paths, no costs. Your ledger is not part of
 it and never leaves the machine.
 
-**There is nothing to sign in to.** Identity is this container's own Plow
-token, which the index resolves by asking Plow. No second account, no device
-flow. Turn it off whenever you like — the agent works exactly the same:
+**There is nothing to sign in to.** Identity starts as this container's own
+Plow token: registering trades it, via Plow, for an Index key this install
+keeps, and every report after that carries the key alone. No second account,
+no device flow. Turn it off whenever you like — the agent works exactly the
+same:
 
 ```sh
 docker exec hermes-cfo python3 /opt/data/skills/cfo-shared/scripts/money.py \
@@ -181,37 +183,47 @@ script is the job, so no model wakes up and nothing is delivered to the chat.
 Its output goes to `~/.hermes-<name>/logs/agent-index.log`, which is the only
 place a `deliver: local` job leaves a trace you can read.
 
-- **`PLOW_AGENT_TOKEN`** — the credential and the whole identity. The gateway
-  loads it from the home's `.env` at boot, so **a scheduled run inherits it and
-  a `docker exec` session does not**. Testing by hand looks unconfigured; the
-  scheduled run is the one that counts.
-- **`HOME=/opt/data`** — where the client keeps its collection baseline. The
-  container's own `HOME` is `/root`, in the image layer that every
-  `agent-mgr deploy` recreates.
+- **the Index key** at `~/.hermes-<name>/.agent-index/token` — the only
+  credential a **report** needs, minted once by `--register` and living in the
+  bind mount so a deploy cannot take it. `PLOW_AGENT_TOKEN` is needed for that
+  one registration and nothing else; the gateway loads it from the home's
+  `.env` at boot, so **a scheduled run inherits it and a `docker exec` session
+  does not** — which is why registering by hand means passing it in.
+- **`HOME=/opt/data`** — where the client reads that key and keeps its
+  collection baseline. The container's own `HOME` is `/root`, in the image
+  layer that every `agent-mgr deploy` recreates.
 - **`HERMES_HOME=/opt/data`** — where `state.db` is. A wrong path is not an
   error; it reads as **zero tokens**, which on a public index looks like an
   agent nobody uses rather than one nobody configured.
 
-Publishing the agent itself is a one-time act by whoever owns the id, and now
-needs no account of any kind — the container's token is the proof:
+Publishing the agent itself is a one-time act by whoever owns the id, and needs
+no account of any kind — the container's Plow token is the proof, and the same
+call mints the key every later report uses:
 
 ```sh
-python3 agent_index_client.py --agent cfo --register \
+docker exec -e PLOW_AGENT_TOKEN="$PLOW_AGENT_TOKEN" -e HOME=/opt/data hermes-cfo \
+  python3 /opt/data/scripts/agent_index_client.py --agent cfo --register \
   --name "cfo" \
   --blurb "A financial manager you text. Log what you spend in plain language, ask where the month is heading — the ledger stays a file on your own Mac." \
   --repo https://github.com/rauppvj/cfo-hermes-agent \
   --runtime "Hermes / Plow" \
-  --builder-name "Vinicius Raupp" --builder-handle @rauppvj \
   --image https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/chat-and-panel.png
 ```
 
-> **The identity model changed under this repo on 2026-09-03.** It was a GitHub
-> account proven by device flow; it is now the container's Plow token, and the
-> index stopped accepting the old keys — and dropped every registration made
-> under them — the same day. If reporting is silently at zero, that class of
-> break is the first thing to check: read the log above, and re-fetch the
-> client (`rm ~/.hermes-<name>/scripts/agent_index_client.py`, then
-> `agent-mgr deploy <name>`).
+**Your name on the page does not come from here.** There is no `--builder-name`
+any more: the index resolves the builder from the **Plow profile** behind that
+token, per request, and renders "an anonymous builder" when Plow holds no name.
+Set your name and photo on your Plow account and the page follows immediately —
+no re-registration, no deploy.
+
+> **The identity model changed under this repo twice on 2026-09-03.** It was a
+> GitHub account proven by device flow; then the container's Plow token sent as
+> the bearer; and is now an Index key minted from that token. Each change made
+> the previous credential a 401 the same day, and the first of them dropped
+> every registration made under the old keys. If reporting is silently at zero,
+> that class of break is the first thing to check: read the log above, re-fetch
+> the client (`agent-mgr deploy <name>` does it on every deploy), and register
+> again to mint a current key.
 </details>
 
 ## Start from the statement, not from typing

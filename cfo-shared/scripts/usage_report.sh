@@ -6,26 +6,36 @@
 # Read it yourself; the client is one file of standard-library Python at
 # /opt/data/scripts/agent_index_client.py.
 #
-# WHO IT REPORTS AS changed on 2026-09-03, upstream, mid-hackathon: identity
-# was a GitHub account proven by device flow, and is now **the container's own
-# Plow token**, which the index resolves by asking Plow. The index stopped
-# accepting the old key the same day -- an install that still holds one gets
-# 401 on every run and lands on the board at zero. So this wrapper reports only
-# when PLOW_AGENT_TOKEN is present, and says so in the log when it is not.
+# WHO IT REPORTS AS changed TWICE on 2026-09-03, upstream, mid-hackathon.
+# Identity was a GitHub account proven by device flow; then the container's own
+# Plow token, sent as the bearer; and is now an **Index key this install mints
+# once**. The Plow token is exchanged at Plow for a short-lived assertion,
+# `--register` trades that assertion for an `aik_` key, and every report after
+# it carries the key alone. Each change made the previous credential a 401 the
+# same day, which is a silent landing on a public leaderboard at zero.
 #
-# Three environment variables decide whether this works, and none of them
+# So the gate here is THE KEY, not the Plow token. Gating on PLOW_AGENT_TOKEN
+# (as this did between the second and third change) is wrong in the direction
+# that costs the metric: an install holding a perfectly good key, whose gateway
+# happens not to export the Plow token, would skip every run and report nothing.
+#
+# Registration is the one step that still needs the Plow token, it is one-time,
+# and it is not this script's job -- see the README.
+#
+# Two environment variables decide whether this works, and neither one
 # announces itself when wrong:
 #
-#   PLOW_AGENT_TOKEN -- the credential, and the whole identity. The gateway
-#     loads it from the home's .env at boot, so a hermes cron job inherits it
-#     and a `docker exec` session does NOT. That asymmetry is why this script
-#     logs rather than prints: run by hand it will look unconfigured, and the
-#     scheduled run is the one that counts.
+#   HOME=/opt/data -- where the client reads the minted key
+#     (~/.agent-index/token) and keeps its collection baseline. The container
+#     runs with HOME=/root, in the image layer that every `agent-mgr deploy`
+#     recreates: the key would vanish with it, silently.
 #
-#   HOME=/opt/data -- the client keeps its collection baseline here. The
-#     container runs with HOME=/root, which is the image's own writable layer:
-#     every `agent-mgr deploy` recreates it, and losing the baseline re-dumps
-#     history onto one day.
+# (PLOW_AGENT_TOKEN is no longer read here at all. For the record, the gateway
+#     loads it from the home's .env at boot, so a hermes cron job inherits it
+#     and a `docker exec` session does NOT -- which is why registering by hand
+#     takes passing it in explicitly. This script still logs rather than
+#     prints, because the scheduled run is the one that counts and it has no
+#     terminal to print to.)
 #
 #   HERMES_HOME=/opt/data -- where state.db is. A wrong path is NOT an error;
 #     it reads as zero tokens, which on a public index looks like an agent
@@ -44,6 +54,9 @@ CLIENT=/opt/data/scripts/agent_index_client.py
 MONEY=/opt/data/skills/cfo-shared/scripts/money.py
 AGENT="${AGENT_INDEX_ID:-cfo}"
 LOG=/opt/data/logs/agent-index.log
+# The minted Index key, and the only credential a report needs. Under
+# HOME=/opt/data this is the bind mount, so it survives `agent-mgr deploy`.
+KEY=/opt/data/.agent-index/token
 
 # STDOUT STAYS EMPTY. This is a `--no-agent` cron row and hermes delivers such
 # a script's stdout verbatim -- "Empty stdout = silent". Anything printed on a
@@ -67,13 +80,43 @@ if [ ! -f "$CLIENT" ]; then
     exit 0
 fi
 
-if [ -z "${PLOW_AGENT_TOKEN:-}" ]; then
-    # Not a failure: run by hand this is simply the wrong environment, and an
-    # install whose owner never wanted reporting is entitled to be quiet.
-    log "no PLOW_AGENT_TOKEN in this environment -- nothing reported."
-    log "  (the gateway loads it from the home's .env, so a scheduled run has"
-    log "   it and a docker exec does not; to test by hand, pass it in)"
-    exit 0
+# MINT THE KEY IF THIS INSTALL HAS NONE. Upstream saves a key in exactly one
+# place -- inside `--register` -- and registering CLAIMS an agent id, which
+# only the person who published it can do. Every other install of cfo therefore
+# reaches the report with no key and exits, and the message it exits with says
+# "no PLOW_AGENT_TOKEN" on a machine that has one. Silent, and it costs the
+# only thing the index measures: the count of distinct installs that report.
+#
+# Minting is its own server call (POST /v1/keys, scope usage,stories) and does
+# not touch registration, so this is the missing step rather than a workaround.
+# It runs AFTER the opt-out check above: an owner who turned reporting off has
+# already left, and no credential is created for them.
+#
+# The client is imported rather than reimplemented: it owns the URL policy, the
+# refusal to follow redirects, the shape check on a key and the atomic write.
+# Duplicating those here would be a second copy to keep correct.
+if [ ! -s "$KEY" ]; then
+    out="$(python3 - "$CLIENT" "$AGENT" 2>&1 <<'PY'
+import importlib.util, sys
+path, agent = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location("aic", path)
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+for name in ("index_assertion", "save_key", "_post", "API"):
+    if not hasattr(m, name):
+        sys.exit(f"the client no longer exposes {name}() -- register by hand")
+code, body = m._post(m.API + "/v1/keys", {"label": agent}, m.index_assertion())
+if code != 200 or not m.AGENT_KEY.match(str(body.get("key", ""))):
+    sys.exit(f"key mint refused: {code} {body}")
+m.save_key(body["key"])
+print("minted an Index key for this install")
+PY
+)" || status=$?
+    log "${out:-（no output）}"
+    if [ ! -s "$KEY" ]; then
+        log "  no key and none could be minted -- nothing reported this run."
+        exit 0
+    fi
 fi
 
 # `|| true` and an explicit status, because `set -e` would take the client's
