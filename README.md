@@ -213,8 +213,12 @@ docker exec -e PLOW_AGENT_TOKEN="$PLOW_AGENT_TOKEN" -e HOME=/opt/data hermes-cfo
 **Your name on the page does not come from here.** There is no `--builder-name`
 any more: the index resolves the builder from the **Plow profile** behind that
 token, per request, and renders "an anonymous builder" when Plow holds no name.
-Set your name and photo on your Plow account and the page follows immediately —
-no re-registration, no deploy.
+A name Plow holds shows up immediately — no re-registration, no deploy.
+
+Getting Plow to hold one is, as of 2026-09-04, not possible for an account
+created after the GitHub device flow was removed: writing the profile needs a
+scope no owner credential has. The evidence, and the report to send upstream,
+are in [`docs/builder-identity.md`](docs/builder-identity.md).
 
 > **The identity model changed under this repo twice on 2026-09-03.** It was a
 > GitHub account proven by device flow; then the container's Plow token sent as
