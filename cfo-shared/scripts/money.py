@@ -37,12 +37,38 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DEFAULT_CATEGORIES = [
     "food", "groceries", "transport", "housing", "utilities", "health",
     "education", "shopping", "leisure", "subscriptions", "fees", "other",
 ]
+
+# How the money left. `debit` is anything that leaves the account the moment
+# it is spent -- pix, cash, a debit card, a boleto. `credit` is a card that
+# settles later: the purchase is spending TODAY, in this month's categories,
+# but it leaves the account only when the invoice is paid. That is why "how
+# much did I spend?" and "how much do I have?" are different questions with
+# different answers. On 2026-09-08 the owner asked both in one evening and
+# got the same number for each, and it matched neither the bank nor the
+# card: card purchases were being subtracted from the balance, and the card
+# payment was being counted as spending on top of them.
+METHODS = ("debit", "credit")
+METHOD_ALIASES = {
+    "debit": "debit", "debito": "debit", "pix": "debit", "cash": "debit",
+    "dinheiro": "debit", "boleto": "debit", "ted": "debit", "doc": "debit",
+    "transfer": "debit", "transferencia": "debit", "account": "debit",
+    "conta": "debit",
+    "credit": "credit", "credito": "credit", "card": "credit",
+    "cartao": "credit", "cc": "credit", "fatura": "credit",
+}
+
+# The one row kind that is neither spending nor income: money moving from the
+# account to the card issuer to settle purchases already recorded. It lowers
+# the balance and touches no category. Counted as an expense it doubles every
+# card purchase -- which is exactly what a R$ 2.841,17 "paid my card bill"
+# did on 2026-09-08.
+CARD_PAYMENT = "card_payment"
 
 
 def data_dir() -> Path:
@@ -199,14 +225,22 @@ def init(con: sqlite3.Connection) -> None:
             day_local    TEXT    NOT NULL,
             month_local  TEXT    NOT NULL,
             amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
-            kind         TEXT    NOT NULL CHECK (kind IN ('expense','income')),
+            kind         TEXT    NOT NULL
+                         CHECK (kind IN ('expense','income','transfer')),
             category     TEXT    NOT NULL,
             note         TEXT    NOT NULL DEFAULT '',
             source       TEXT    NOT NULL DEFAULT 'chat',
-            created_utc  TEXT    NOT NULL
+            created_utc  TEXT    NOT NULL,
+            method       TEXT    NOT NULL DEFAULT 'debit'
+                         CHECK (method IN ('debit','credit'))
         );
         CREATE INDEX IF NOT EXISTS tx_month ON tx (month_local);
         CREATE INDEX IF NOT EXISTS tx_day   ON tx (day_local);
+        CREATE TABLE IF NOT EXISTS budget (
+            category     TEXT PRIMARY KEY,
+            amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+            updated_utc  TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS merchant_category (
             merchant    TEXT PRIMARY KEY,
             label       TEXT NOT NULL,
@@ -237,6 +271,11 @@ def init(con: sqlite3.Connection) -> None:
     # CREATE TABLE IF NOT EXISTS above is the whole migration -- a v2 ledger
     # opens as v3 with an empty map and classifies exactly as it did before.
 
+    # v3 -> v4: a payment method on every row and a third kind, `transfer`.
+    # Both live in the CHECK constraints of `tx`, which SQLite cannot alter
+    # in place, so this one is a rebuild -- see _migrate_tx_v4.
+    _migrate_tx_v4(con)
+
     con.execute(
         "INSERT OR IGNORE INTO config (key, value) VALUES ('schema_version', ?)",
         (str(SCHEMA_VERSION),),
@@ -244,6 +283,62 @@ def init(con: sqlite3.Connection) -> None:
     con.execute("UPDATE config SET value = ? WHERE key = 'schema_version'",
                 (str(SCHEMA_VERSION),))
     con.commit()
+
+
+def _migrate_tx_v4(con: sqlite3.Connection) -> None:
+    """Rebuild `tx` with a `method` column and `transfer` as a legal kind.
+
+    Every row that exists was money leaving the account when it was logged,
+    so the old rows become `debit` -- the only reading that changes no total
+    anybody has already been told. A v3 ledger opens as v4 and every command
+    answers exactly as it did, until the first `--via credit` or `card pay`.
+
+    A real person's ledger is being rewritten in place, so a copy is taken
+    first through SQLite's own backup call -- a file copy of a WAL-mode
+    database can miss the pages still in the log -- and the rebuild is one
+    transaction: either the new table is there with every row, or the old
+    one is untouched.
+    """
+    cols = {r[1] for r in con.execute("PRAGMA table_info(tx)")}
+    if "method" in cols:
+        return
+    try:
+        keep = sqlite3.connect(str(db_path()) + ".v3.bak")
+        con.backup(keep)
+        keep.close()
+    except sqlite3.Error as exc:
+        print(f"warning: could not back up the ledger before migrating: {exc}",
+              file=sys.stderr)
+    con.executescript(
+        """
+        BEGIN;
+        CREATE TABLE tx_v4 (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_utc       TEXT    NOT NULL,
+            day_local    TEXT    NOT NULL,
+            month_local  TEXT    NOT NULL,
+            amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+            kind         TEXT    NOT NULL
+                         CHECK (kind IN ('expense','income','transfer')),
+            category     TEXT    NOT NULL,
+            note         TEXT    NOT NULL DEFAULT '',
+            source       TEXT    NOT NULL DEFAULT 'chat',
+            created_utc  TEXT    NOT NULL,
+            method       TEXT    NOT NULL DEFAULT 'debit'
+                         CHECK (method IN ('debit','credit'))
+        );
+        INSERT INTO tx_v4 (id, ts_utc, day_local, month_local, amount_cents,
+                           kind, category, note, source, created_utc, method)
+            SELECT id, ts_utc, day_local, month_local, amount_cents,
+                   kind, category, note, source, created_utc, 'debit'
+            FROM tx;
+        DROP TABLE tx;
+        ALTER TABLE tx_v4 RENAME TO tx;
+        CREATE INDEX IF NOT EXISTS tx_month ON tx (month_local);
+        CREATE INDEX IF NOT EXISTS tx_day   ON tx (day_local);
+        COMMIT;
+        """
+    )
 
 
 def get_cfg(con: sqlite3.Connection, key: str, default: str = "") -> str:
@@ -315,6 +410,16 @@ def validate_cfg(key: str, value: str) -> str:
     no error to see -- silence is what a working schedule and a broken one
     both look like.
     """
+    if key == "language":
+        # "pt-BR", "Portuguese", "en_US" -> the two letters the panel and the
+        # brief gate key off. Anything else is stored as typed and falls back
+        # to the currency's language, which is what happened before this key
+        # existed.
+        val = (value or "").strip().lower()
+        names = {"portuguese": "pt", "portugues": "pt", "português": "pt",
+                 "english": "en", "ingles": "en", "inglês": "en",
+                 "spanish": "es", "espanhol": "es", "español": "es"}
+        return names.get(val, re.split(r"[-_]", val)[0][:2] or val)
     if key not in BRIEF_HOUR_KEYS:
         return value
     val = (value or "").strip().lower()
@@ -346,6 +451,24 @@ def currency_of(con: sqlite3.Connection) -> str:
     return get_cfg(con, "currency") or "BRL"
 
 
+# The language the owner writes in. Stored by the agent on first contact
+# (`config language`), and until then inferred from the currency -- the one
+# setting that is certainly answered before there is anything to say. The
+# chat needs none of this: it mirrors the message in front of it. The brief
+# and the panel have no message to mirror, which is how a morning brief went
+# out in Portuguese to an owner who had written nothing but English for a
+# week: every worked example in the skills is Portuguese, and with nothing
+# else to go on, that was the loudest thing in the room.
+CURRENCY_LANGUAGE = {"BRL": "pt", "EUR": "en", "USD": "en", "GBP": "en"}
+LANGUAGE_NAMES = {"pt": "Portuguese", "en": "English", "es": "Spanish",
+                  "fr": "French", "de": "German", "it": "Italian"}
+
+
+def language_of(con: sqlite3.Connection) -> str:
+    stored = (get_cfg(con, "language") or "").strip().lower()[:2]
+    return stored or CURRENCY_LANGUAGE.get(currency_of(con), "en")
+
+
 def now_local(con: sqlite3.Connection) -> datetime:
     return datetime.now(timezone.utc).astimezone(tz_of(con))
 
@@ -354,13 +477,91 @@ def now_local(con: sqlite3.Connection) -> datetime:
 # operations
 # --------------------------------------------------------------------------
 
-def add_tx(con, amount_cents, kind, category, note="", source="chat", when=None):
+WEEKDAYS = {
+    "monday": 0, "mon": 0, "segunda": 0, "segunda-feira": 0, "seg": 0,
+    "tuesday": 1, "tue": 1, "terca": 1, "terca-feira": 1, "ter": 1,
+    "wednesday": 2, "wed": 2, "quarta": 2, "quarta-feira": 2, "qua": 2,
+    "thursday": 3, "thu": 3, "quinta": 3, "quinta-feira": 3, "qui": 3,
+    "friday": 4, "fri": 4, "sexta": 4, "sexta-feira": 4, "sex": 4,
+    "saturday": 5, "sat": 5, "sabado": 5, "sab": 5,
+    "sunday": 6, "sun": 6, "domingo": 6, "dom": 6,
+}
+RELATIVE_DAYS = {"today": 0, "hoje": 0, "yesterday": 1, "ontem": 1,
+                 "anteontem": 2, "day before yesterday": 2}
+
+
+def resolve_on(con, raw, today=None):
+    """The moment a transaction the owner DATED should be stamped with.
+
+    `raw` is what the owner said: an ISO date, `today`/`hoje`,
+    `yesterday`/`ontem`, `anteontem`, or a weekday in English or Portuguese
+    (`saturday`, `sábado`, `sab`) -- meaning the most recent one, today
+    included. None means now.
+
+    A past day is stamped at NOON in the owner's zone. Midnight is the one
+    hour that changes date under a zone shift and noon the one that never
+    does; the statement importer made the same choice for the same reason.
+    Today keeps the real clock, so a row logged at 22:40 sorts after a
+    balance the owner read off the bank at 22:34.
+
+    The future is refused: a purchase dated tomorrow is a typo or a plan, and
+    the ledger records neither.
+
+    This exists because of 2026-09-08. The owner sat down at 22:00 and
+    listed four days -- "Saturday I paid...", "Sunday...", "Monday...",
+    "today..." -- and the engine could not take a date, so all four landed on
+    the 8th. The next morning's brief opened with a "yesterday" four days'
+    worth of spending big, and projected the month at a five-figure negative
+    close. Every figure was correct arithmetic on rows that said what the
+    owner had said; only the days were wrong, and nothing downstream could
+    tell.
+    """
+    if raw is None or not str(raw).strip():
+        return None
+    now = today or now_local(con)
+    key = strip_accents(str(raw)).strip().lower()
+    if key in RELATIVE_DAYS:
+        day = (now - timedelta(days=RELATIVE_DAYS[key])).date()
+    elif key in WEEKDAYS:
+        day = (now - timedelta(days=(now.weekday() - WEEKDAYS[key]) % 7)).date()
+    else:
+        try:
+            day = datetime.strptime(key, "%Y-%m-%d").date()
+        except ValueError:
+            raise SystemExit(
+                f"cannot read the day {raw!r} -- use YYYY-MM-DD, today, "
+                "yesterday, or a weekday name (saturday, sábado)")
+    if day > now.date():
+        raise SystemExit(
+            f"{day.isoformat()} is in the future -- the ledger records what "
+            "happened, not what is planned")
+    if day == now.date():
+        return now
+    return datetime(day.year, day.month, day.day, 12, 0, tzinfo=tz_of(con))
+
+
+def normalise_method(raw: str | None) -> str:
+    """`pix`, `cartão`, `cc`, `débito`... -> `debit` or `credit`."""
+    if raw is None or not str(raw).strip():
+        return "debit"
+    key = strip_accents(str(raw)).strip().lower()
+    try:
+        return METHOD_ALIASES[key]
+    except KeyError:
+        raise SystemExit(
+            f"unknown payment method {raw!r} -- use debit (pix, cash, boleto, "
+            "debit card) or credit (a card that settles on an invoice)")
+
+
+def add_tx(con, amount_cents, kind, category, note="", source="chat", when=None,
+           method="debit"):
     """Record one transaction, resolving its day in the OWNER's zone."""
     tz = tz_of(con)
     moment = (when.astimezone(tz) if when else datetime.now(timezone.utc).astimezone(tz))
     cur = con.execute(
         "INSERT INTO tx (ts_utc, day_local, month_local, amount_cents, kind,"
-        " category, note, source, created_utc) VALUES (?,?,?,?,?,?,?,?,?)",
+        " category, note, source, created_utc, method)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
             moment.astimezone(timezone.utc).isoformat(timespec="seconds"),
             moment.strftime("%Y-%m-%d"),
@@ -371,10 +572,69 @@ def add_tx(con, amount_cents, kind, category, note="", source="chat", when=None)
             note.strip(),
             source,
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            method if kind != "income" else "debit",
         ),
     )
     con.commit()
     return cur.lastrowid
+
+
+def get_tx(con, tid: int) -> dict:
+    row = con.execute("SELECT * FROM tx WHERE id = ?", (tid,)).fetchone()
+    if not row:
+        raise SystemExit(f"no transaction with id {tid}")
+    return dict(row)
+
+
+def edit_tx(con, tid: int, when=None, amount_cents=None, kind=None,
+            category=None, note=None, method=None) -> dict:
+    """Change a row in place, and say what it was before.
+
+    Corrections used to be `delete` then `add` -- two calls, a new id, and a
+    row re-stamped with today's date even when the owner was fixing
+    Saturday's amount. `edit` keeps the id and touches only what was named:
+    moving a row to another day recomputes its day and month in the owner's
+    zone, and nothing else about it changes.
+    """
+    before = get_tx(con, tid)
+    after = dict(before)
+    if when is not None:
+        after["ts_utc"] = when.astimezone(timezone.utc).isoformat(timespec="seconds")
+        after["day_local"] = when.strftime("%Y-%m-%d")
+        after["month_local"] = when.strftime("%Y-%m")
+    if amount_cents is not None:
+        after["amount_cents"] = int(amount_cents)
+    if kind is not None:
+        after["kind"] = kind
+    if category is not None:
+        after["category"] = category.strip().lower()
+    if note is not None:
+        after["note"] = note.strip()
+    if method is not None:
+        after["method"] = method
+    con.execute(
+        "UPDATE tx SET ts_utc=?, day_local=?, month_local=?, amount_cents=?,"
+        " kind=?, category=?, note=?, method=? WHERE id=?",
+        (after["ts_utc"], after["day_local"], after["month_local"],
+         after["amount_cents"], after["kind"], after["category"],
+         after["note"], after["method"], tid))
+    con.commit()
+    changed = sorted(k for k in after if after[k] != before[k])
+    return {"id": tid, "changed": changed, "before": before, "after": after}
+
+
+def last_logged(con) -> dict | None:
+    """The newest row the owner logged in the chat -- what "undo" means.
+
+    Never a demo row and never an imported one: "apaga o último" after an
+    import would silently drop one line of a statement, and the owner would
+    be told a whole import was reversed when it was not. Imports have their
+    own undo, by batch.
+    """
+    row = con.execute(
+        "SELECT * FROM tx WHERE source NOT IN ('demo')"
+        " AND source NOT LIKE 'import:%' ORDER BY id DESC LIMIT 1").fetchone()
+    return dict(row) if row else None
 
 
 def month_totals(con, month: str) -> dict:
@@ -383,8 +643,14 @@ def month_totals(con, month: str) -> dict:
         " FROM tx WHERE month_local = ? GROUP BY kind",
         (month,),
     ).fetchall()
-    out = {"month": month, "expense": 0, "income": 0, "count": 0}
+    out = {"month": month, "expense": 0, "income": 0, "count": 0,
+           "card_paid": 0}
     for r in rows:
+        if r["kind"] == "transfer":
+            # Settles purchases already in `expense`; not spending, not
+            # income, and not in the count of things that happened.
+            out["card_paid"] = int(r["total"] or 0)
+            continue
         out[r["kind"]] = int(r["total"] or 0)
         out["count"] += int(r["n"])
     out["net"] = out["income"] - out["expense"]
@@ -414,8 +680,11 @@ def day_totals(con, day: str, today=None) -> dict:
         " FROM tx WHERE day_local = ? GROUP BY kind",
         (day,),
     ).fetchall()
-    out = {"day": day, "expense": 0, "income": 0, "count": 0}
+    out = {"day": day, "expense": 0, "income": 0, "count": 0, "card_paid": 0}
     for r in rows:
+        if r["kind"] == "transfer":
+            out["card_paid"] = int(r["total"] or 0)
+            continue
         out[r["kind"]] = int(r["total"] or 0)
         out["count"] += int(r["n"])
     out["net"] = out["income"] - out["expense"]
@@ -669,7 +938,20 @@ def simulate(con, amount_cents: int, installments: int = 1, today=None) -> dict:
     after_expense = base["projected_expense"] + first
     after_net = base["projected_income"] - after_expense
 
+    # What is in the account, and what would be after the first instalment
+    # -- when the owner has given a reading. "It fits the month" and "I
+    # have it in the account today" are different questions; a purchase
+    # can pass the first and fail the second on the 3rd of the month.
+    bal = balance(con, today=today)
+    account = ({"balance_now_cents": bal["balance_cents"],
+                "balance_after_first_cents": bal["balance_cents"] - first,
+                "card_open_cents": bal["card_open_cents"]}
+               if bal["has_anchor"] else
+               {"balance_now_cents": None, "balance_after_first_cents": None,
+                "card_open_cents": bal["card_open_cents"]})
+
     return {
+        **account,
         **{f"base_{k}": v for k, v in base.items()},
         "purchase": amount_cents,
         "installments": installments,
@@ -704,10 +986,15 @@ def status(con, today=None) -> dict:
         "SELECT COUNT(*) AS n FROM tx WHERE source = 'demo'").fetchone()["n"]
     total_tx = con.execute("SELECT COUNT(*) AS n FROM tx").fetchone()["n"]
 
+    bal = balance(con, today=today)
+    bud = budgets(con, today=today)
     return {
         "configured": {
             "timezone": get_cfg(con, "timezone") or None,
             "currency": get_cfg(con, "currency") or None,
+            # The language the owner writes in, stored once so the brief --
+            # which has no message to mirror -- and the panel speak it too.
+            "language": get_cfg(con, "language") or None,
             # In the owner's own zone, which is what the gate opens on. Here
             # so "a que horas voce me manda o resumo?" is a field to read
             # rather than a cron expression nobody in the chat can see.
@@ -722,12 +1009,19 @@ def status(con, today=None) -> dict:
         "all_data_is_demo": bool(demo) and demo == total_tx,
         "fixed": [dict(r) for r in rows],
         "basis": b,
+        "balance": {
+            "has_anchor": bal["has_anchor"],
+            "balance_cents": bal["balance_cents"],
+            "anchor_age_days": bal.get("anchor_age_days"),
+            "card_open_cents": bal["card_open_cents"],
+        },
+        "budgets": {"count": bud["count"], "attention": bud["attention"]},
         "ready": b["usable"] and bool(get_cfg(con, "timezone")),
-        "next_step": _next_step(con, b),
+        "next_step": _next_step(con, b, bal),
     }
 
 
-def _next_step(con, b) -> str | None:
+def _next_step(con, b, bal=None) -> str | None:
     """The single most useful thing to ask for next, or None when set up."""
     if not get_cfg(con, "timezone"):
         return "ask which city they are in, to set the timezone"
@@ -736,6 +1030,12 @@ def _next_step(con, b) -> str | None:
                 "typical month with `config expected_income`")
     if not b["has_fixed_costs"]:
         return "ask for their fixed monthly costs, starting with rent"
+    if bal is not None and not bal["has_anchor"]:
+        # The one question that makes "how much do I have?" answerable.
+        # Asked after income and bills because those are what the answer is
+        # then kept current with.
+        return ("ask what is in their account right now, and record it with "
+                "`balance set` -- without it 'how much do I have?' has no answer")
     if b["days_of_history"] < 5:
         return "nothing to ask -- they just need to log a few days of spending"
     return None
@@ -891,11 +1191,316 @@ def recategorize(con, mapping: dict) -> dict:
 
 def recent(con, limit: int = 20) -> list[dict]:
     rows = con.execute(
-        "SELECT id, day_local, amount_cents, kind, category, note FROM tx"
-        " ORDER BY id DESC LIMIT ?",
+        "SELECT id, day_local, amount_cents, kind, method, category, note,"
+        " source FROM tx ORDER BY id DESC LIMIT ?",
         (limit,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# --------------------------------------------------------------------------
+# balance: "how much do I have?" -- the question a ledger cannot answer alone
+# --------------------------------------------------------------------------
+
+def balance_anchor(con) -> dict | None:
+    raw = get_cfg(con, "balance_anchor")
+    if not raw:
+        return None
+    try:
+        a = json.loads(raw)
+        return {"cents": int(a["cents"]), "utc": str(a["utc"]), "day": str(a["day"]),
+                "after_id": int(a.get("after_id", 0))}
+    except (ValueError, KeyError, TypeError):
+        print("warning: unreadable balance anchor, ignoring it", file=sys.stderr)
+        return None
+
+
+def set_balance(con, cents: int, when=None) -> dict:
+    """Anchor the account at a figure the owner read off their bank.
+
+    Not a transaction, and not something the ledger could ever work out: it
+    never saw the opening figure, and a card settles later than the purchase
+    it paid for. The owner's own reading is the one fact that makes the
+    question answerable. From that instant the balance is the anchor, plus
+    income, minus what LEFT the account -- debit spending and card payments
+    -- and a card purchase does not move it until the invoice is paid.
+
+    The owner tried to say this on 2026-09-08 -- "adjust my balance to
+    1.312,40" -- and was refused, correctly by the rules of the time, because
+    the only way to hold a figure was a fake transaction. This is the other
+    way. Set it again whenever they read a fresh number; the newest anchor
+    wins and nothing before it is counted twice.
+    """
+    moment = when or now_local(con)
+    # The id of the newest row at this instant. Timestamps are whole seconds
+    # and the agent runs `balance set` and the next `add` in one breath, so
+    # "after the anchor" has to be decided by id when the seconds tie.
+    last = con.execute("SELECT COALESCE(MAX(id), 0) AS n FROM tx").fetchone()["n"]
+    anchor = {"cents": int(cents),
+              "utc": moment.astimezone(timezone.utc).isoformat(timespec="seconds"),
+              "day": moment.strftime("%Y-%m-%d"),
+              "after_id": int(last)}
+    set_cfg(con, "balance_anchor", json.dumps(anchor))
+    return anchor
+
+
+def _sum_since(con, utc: str, where: str, after_id: int = 0) -> int:
+    """Rows after an instant -- later by timestamp, or the same second and a
+    higher id. A row backdated to noon last Saturday has an earlier timestamp
+    than an anchor read on Monday, so it stays out, which is right: the bank
+    already knew about Saturday when the owner read the figure."""
+    row = con.execute(
+        f"SELECT COALESCE(SUM(amount_cents), 0) AS t FROM tx"
+        f" WHERE (ts_utc > ? OR (ts_utc = ? AND id > ?)) AND {where}",
+        (utc, utc, after_id)).fetchone()
+    return int(row["t"])
+
+
+def card_open(con) -> dict:
+    """Credit purchases not yet settled -- what the next invoice already
+    holds. Counted from the last card payment; all of them if there has
+    never been one."""
+    last = con.execute(
+        "SELECT id, ts_utc, day_local FROM tx WHERE kind = 'transfer'"
+        " ORDER BY ts_utc DESC, id DESC LIMIT 1").fetchone()
+    since, after = (last["ts_utc"], last["id"]) if last else ("", 0)
+    return {"card_open_cents": _sum_since(con, since, "kind = 'expense' AND method = 'credit'",
+                                          after_id=after),
+            "card_paid_on": last["day_local"] if last else None}
+
+
+def card_key(name: str) -> str:
+    return "card:" + " ".join(merchant_tokens(name))
+
+
+def set_card(con, name: str, method: str) -> dict:
+    """Remember what a named card is. A Wallet tap arrives with the card's
+    name and nothing else; without this, every tap is credit."""
+    if not merchant_tokens(name):
+        raise SystemExit(f"a card needs a name, got {name!r}")
+    set_cfg(con, card_key(name), method)
+    return {"card": name.strip(), "method": method}
+
+
+def method_of_card(con, name: str | None) -> str:
+    """The method a named card was set to, else credit -- what a card in a
+    phone wallet almost always is."""
+    if not name or not merchant_tokens(name):
+        return "credit"
+    return get_cfg(con, card_key(name)) or "credit"
+
+
+def cards(con) -> list[dict]:
+    rows = con.execute("SELECT key, value FROM config WHERE key LIKE 'card:%'"
+                       " ORDER BY key").fetchall()
+    return [{"card": r["key"][5:], "method": r["value"]} for r in rows]
+
+
+def pay_card(con, cents: int, when=None, note: str = "") -> int:
+    """Settle the card: money leaves the account, no category moves."""
+    return add_tx(con, cents, "transfer", CARD_PAYMENT,
+                  note=note or "card payment", when=when, method="debit")
+
+
+# An anchor this old has drifted: something was paid that nobody logged. Not
+# unusable -- the arithmetic is still right on what was logged -- but worth a
+# fresh reading, which the brief can ask for.
+ANCHOR_STALE_DAYS = 14
+
+
+def balance(con, today=None) -> dict:
+    """What is in the account now, from the last reading plus what moved.
+
+    `basis.usable` is false with no anchor, and the reason says what to ask.
+    A verdict built without one -- income minus expenses since the dawn of
+    the ledger -- is the number the owner was given on 2026-09-08, and it
+    was wrong by exactly the opening balance nobody had ever been asked for.
+    """
+    today = today or now_local(con)
+    anchor = balance_anchor(con)
+    on_card = card_open(con)
+    due = [d for d in upcoming_fixed(con, today=today, within_days=7)
+           if d["kind"] == "expense"]
+    due_cents = sum(d["amount_cents"] for d in due)
+    if not anchor:
+        return {
+            "has_anchor": False,
+            "balance_cents": None,
+            **on_card,
+            "due_soon_cents": due_cents,
+            "basis": {"usable": False, "stale": False, "reasons": [
+                "no balance on file -- ask what is in the account right now "
+                "and record it with `balance set`"]},
+        }
+    utc, after = anchor["utc"], anchor["after_id"]
+    income_since = _sum_since(con, utc, "kind = 'income'", after)
+    debit_since = _sum_since(con, utc, "kind = 'expense' AND method = 'debit'", after)
+    paid_since = _sum_since(con, utc, "kind = 'transfer'", after)
+    now_cents = anchor["cents"] + income_since - debit_since - paid_since
+    age = (today.date() - datetime.strptime(anchor["day"], "%Y-%m-%d").date()).days
+    reasons = []
+    if age > ANCHOR_STALE_DAYS:
+        reasons.append(f"the last balance reading is {age} days old -- worth "
+                       "asking for a fresh one")
+    return {
+        "has_anchor": True,
+        "anchor_cents": anchor["cents"],
+        "anchor_day": anchor["day"],
+        "anchor_age_days": age,
+        "income_since_cents": income_since,
+        "debit_since_cents": debit_since,
+        "card_paid_since_cents": paid_since,
+        "balance_cents": now_cents,
+        **on_card,
+        "due_soon_cents": due_cents,
+        "due_soon": due,
+        "after_due_soon_cents": now_cents - due_cents,
+        "basis": {"usable": True, "stale": age > ANCHOR_STALE_DAYS,
+                  "reasons": reasons},
+    }
+
+
+# --------------------------------------------------------------------------
+# budgets: a ceiling per category, and who is near it
+# --------------------------------------------------------------------------
+
+BUDGET_ATTENTION_PCT = 80
+
+
+def set_budget(con, category: str, cents: int) -> dict:
+    category = category.strip().lower()
+    if category not in DEFAULT_CATEGORIES:
+        raise SystemExit(f"unknown category {category!r} -- one of "
+                         + ", ".join(DEFAULT_CATEGORIES))
+    con.execute(
+        "INSERT INTO budget (category, amount_cents, updated_utc) VALUES (?,?,?)"
+        " ON CONFLICT(category) DO UPDATE SET amount_cents = excluded.amount_cents,"
+        " updated_utc = excluded.updated_utc",
+        (category, int(cents), datetime.now(timezone.utc).isoformat(timespec="seconds")))
+    con.commit()
+    return {"category": category, "limit_cents": int(cents)}
+
+
+def remove_budget(con, category: str) -> dict:
+    n = con.execute("DELETE FROM budget WHERE category = ?",
+                    (category.strip().lower(),)).rowcount
+    con.commit()
+    return {"category": category.strip().lower(), "removed": n}
+
+
+def budgets(con, today=None) -> dict:
+    """Every budget against this month's spending, worst first.
+
+    `attention` names the categories at 80% or over -- the list the brief
+    reads. `on_pace_to_pass` is the same extrapolation `project` makes, per
+    category, and it is None until the month has enough days to carry one:
+    a ceiling "passed at this pace" on the 2nd is one dinner times thirty.
+    """
+    today = today or now_local(con)
+    month = today.strftime("%Y-%m")
+    spent = {r["category"]: r["total"] for r in by_category(con, month)}
+    elapsed, total_days = today.day, days_in_month(today)
+    pace_ok = elapsed >= 5
+    out = []
+    for r in con.execute("SELECT category, amount_cents FROM budget").fetchall():
+        limit = int(r["amount_cents"])
+        used = int(spent.get(r["category"], 0))
+        pct = round(100 * used / limit) if limit else 0
+        projected = int(round(used / elapsed * total_days)) if pace_ok else None
+        out.append({
+            "category": r["category"],
+            "limit_cents": limit,
+            "spent_cents": used,
+            "left_cents": limit - used,
+            "pct": pct,
+            "over": used > limit,
+            "projected_cents": projected,
+            "on_pace_to_pass": (projected > limit) if projected is not None else None,
+        })
+    out.sort(key=lambda b: -b["pct"])
+    return {
+        "month": month,
+        "budgets": out,
+        "count": len(out),
+        "attention": [b["category"] for b in out if b["pct"] >= BUDGET_ATTENTION_PCT],
+    }
+
+
+# --------------------------------------------------------------------------
+# week: the seven days someone can still remember
+# --------------------------------------------------------------------------
+
+def _span_expense(con, first, last) -> int:
+    row = con.execute(
+        "SELECT COALESCE(SUM(amount_cents), 0) AS t FROM tx WHERE kind = 'expense'"
+        " AND day_local BETWEEN ? AND ?",
+        (first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"))).fetchone()
+    return int(row["t"])
+
+
+def week(con, today=None) -> dict:
+    """This week so far against the SAME days of last week.
+
+    Monday-to-today against a whole previous week is a comparison that
+    always says this week is cheaper, until Sunday, when it suddenly is not.
+    The honest pair is Monday-to-Wednesday against last Monday-to-Wednesday;
+    the full previous week is returned too, labelled as such.
+    """
+    today = today or now_local(con)
+    monday = (today - timedelta(days=today.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    prev_monday = monday - timedelta(days=7)
+    same_days = today.weekday()   # 0 on Monday: compare Monday with Monday
+    this_week = _span_expense(con, monday, today)
+    last_same = _span_expense(con, prev_monday, prev_monday + timedelta(days=same_days))
+    last_full = _span_expense(con, prev_monday, monday - timedelta(days=1))
+    top = con.execute(
+        "SELECT category, SUM(amount_cents) AS total FROM tx WHERE kind = 'expense'"
+        " AND day_local BETWEEN ? AND ? GROUP BY category ORDER BY total DESC LIMIT 1",
+        (monday.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))).fetchone()
+    return {
+        "week_start": monday.strftime("%Y-%m-%d"),
+        "today": today.strftime("%Y-%m-%d"),
+        "days_elapsed": same_days + 1,
+        "this_week_cents": this_week,
+        "last_week_same_days_cents": last_same,
+        "delta_cents": this_week - last_same,
+        "last_week_full_cents": last_full,
+        "top_category": ({"category": top["category"], "total_cents": int(top["total"])}
+                         if top else None),
+    }
+
+
+# --------------------------------------------------------------------------
+# export: the owner's rows, as a file the owner can open anywhere
+# --------------------------------------------------------------------------
+
+def export_csv(con, month: str | None = None) -> dict:
+    """One month -- or everything -- as CSV under $CFO_DATA/export.
+
+    The ledger is the owner's. A file they can open in a spreadsheet is the
+    proof, and the way out if they ever leave: nothing here is locked in.
+    Written next to the ledger, never anywhere shared; sending it is the
+    agent's act, on request, into the owner's own chat.
+    """
+    import csv
+    where, params = ("WHERE month_local = ?", (month,)) if month else ("", ())
+    rows = con.execute(
+        f"SELECT id, day_local, kind, method, category, amount_cents, note, source"
+        f" FROM tx {where} ORDER BY day_local, id", params).fetchall()
+    target = data_dir() / "export" / f"{month or 'all'}.csv"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    cur = currency_of(con)
+    with target.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["id", "day", "kind", "method", "category", "amount",
+                    "currency", "note", "source"])
+        for r in rows:
+            w.writerow([r["id"], r["day_local"], r["kind"], r["method"],
+                        r["category"], f"{r['amount_cents'] / 100:.2f}", cur,
+                        r["note"], r["source"]])
+    return {"path": str(target), "rows": len(rows), "month": month or "all",
+            "send": f"MEDIA:{target}"}
 
 
 # --------------------------------------------------------------------------
@@ -906,7 +1511,8 @@ def recent(con, limit: int = 20) -> list[dict]:
 # because timezone and currency decide which day a figure belongs to and how
 # every number on the page is printed; `merchants --forget` is, because it
 # moves spending between categories.
-PANEL_REFRESH = {"add", "delete", "recategorize", "fixed", "config", "merchants"}
+PANEL_REFRESH = {"add", "delete", "recategorize", "fixed", "config", "merchants",
+                 "edit", "balance", "card", "budget"}
 
 
 def refresh_panel(con) -> None:
@@ -942,7 +1548,8 @@ def emit(obj, currency="BRL") -> None:
         out = dict(d)
         for k, v in list(d.items()):
             if isinstance(v, int) and (
-                k.endswith("_cents") or k in {"expense", "income", "net", "total", "purchase"}
+                k.endswith("_cents") or k in {"expense", "income", "net", "total",
+                                              "purchase", "card_paid"}
                 or k.startswith(("projected_", "base_projected_", "spent_", "fixed_", "daily_"))
                 or k.endswith(("_installment", "_after", "_before")) or k == "swing"
             ):
@@ -974,6 +1581,55 @@ def main(argv=None) -> int:
     a.add_argument("--category", default="other")
     a.add_argument("--note", default="")
     a.add_argument("--source", default="chat")
+    a.add_argument("--on", default=None,
+                   help="the day it happened: YYYY-MM-DD, today, yesterday,"
+                        " or a weekday name (saturday, sábado). Default: now")
+    a.add_argument("--via", default=None,
+                   help="debit (pix, cash, boleto, debit card -- the default)"
+                        " or credit (a card that settles on an invoice)")
+    a.add_argument("--card", default=None,
+                   help="the card's name, as a Wallet tap reports it; the"
+                        " method comes from `card set`, else credit")
+
+    e = sub.add_parser("edit", help="change one transaction in place")
+    e.add_argument("id", type=int)
+    e.add_argument("--on", default=None, help="move it to this day")
+    e.add_argument("--amount", default=None)
+    e.add_argument("--kind", choices=["expense", "income"], default=None)
+    e.add_argument("--category", default=None)
+    e.add_argument("--note", default=None)
+    e.add_argument("--via", default=None)
+
+    b = sub.add_parser("balance", help="what is in the account, from the last reading")
+    bsub = b.add_subparsers(dest="bcmd")
+    bs = bsub.add_parser("set", help="record a balance the owner read off the bank")
+    bs.add_argument("amount")
+    bs.add_argument("--on", default=None, help="when it was read (default: now)")
+
+    cd = sub.add_parser("card", help="the credit card: what is open, and paying it")
+    csub = cd.add_subparsers(dest="ccmd", required=True)
+    cp = csub.add_parser("pay", help="record the invoice being paid")
+    cp.add_argument("amount")
+    cp.add_argument("--on", default=None)
+    cp.add_argument("--note", default="")
+    csub.add_parser("open", help="what the next invoice already holds")
+    cset = csub.add_parser("set", help="what a named card is: debit or credit")
+    cset.add_argument("name")
+    cset.add_argument("method")
+    csub.add_parser("list", help="the cards named so far")
+
+    bu = sub.add_parser("budget", help="a monthly ceiling per category")
+    busub = bu.add_subparsers(dest="bucmd")
+    bset = busub.add_parser("set")
+    bset.add_argument("category")
+    bset.add_argument("amount")
+    brm = busub.add_parser("remove")
+    brm.add_argument("category")
+
+    sub.add_parser("week", help="this week so far, against the same days last week")
+
+    ex = sub.add_parser("export", help="the ledger as CSV, to send to the owner")
+    ex.add_argument("--month", default=None, help="YYYY-MM; default: everything")
 
     s = sub.add_parser("summary", help="one month's totals and categories")
     s.add_argument("--month", default=None, help="YYYY-MM (default: current)")
@@ -1008,8 +1664,10 @@ def main(argv=None) -> int:
     r = sub.add_parser("recent", help="last transactions")
     r.add_argument("--limit", type=int, default=20)
 
-    d = sub.add_parser("delete", help="remove a transaction by id")
-    d.add_argument("id", type=int)
+    d = sub.add_parser("delete", help="remove a transaction by id, or the last one logged")
+    d.add_argument("id", type=int, nargs="?")
+    d.add_argument("--last", action="store_true",
+                   help="the newest row logged in the chat -- what 'undo' means")
 
     f = sub.add_parser("fixed", help="manage recurring lines")
     fsub = f.add_subparsers(dest="fcmd", required=True)
@@ -1036,12 +1694,22 @@ def main(argv=None) -> int:
     if args.cmd == "add":
         refuse_symbol_in_amount(args.amount)
         cents = parse_amount(args.amount)
-        tid = add_tx(con, cents, args.kind, args.category, args.note, args.source)
-        month = now_local(con).strftime("%Y-%m")
+        when = resolve_on(con, args.on)
+        method = (normalise_method(args.via) if args.via
+                  else method_of_card(con, args.card) if args.card
+                  else "debit")
+        tid = add_tx(con, cents, args.kind, args.category, args.note, args.source,
+                     when=when, method=method)
+        stamped = get_tx(con, tid)
+        month = stamped["month_local"]
         row = {"id": tid, "amount_cents": cents, "kind": args.kind,
-               "category": args.category, "note": args.note,
+               "method": stamped["method"], "category": args.category,
+               "note": args.note, "day": stamped["day_local"],
+               "backdated": stamped["day_local"] != now_local(con).strftime("%Y-%m-%d"),
                **{k: v for k, v in month_totals(con, month).items() if k != "month"},
                "month": month}
+        if method == "credit" and args.kind == "expense":
+            row["card_open_cents"] = card_open(con)["card_open_cents"]
         bigger = note_disagrees(args.amount, args.note)
         if bigger:
             # Written, not refused: a log that fails is worse than a log that
@@ -1105,9 +1773,83 @@ def main(argv=None) -> int:
         emit(recent(con, args.limit), cur)
 
     elif args.cmd == "delete":
-        con.execute("DELETE FROM tx WHERE id = ?", (args.id,))
-        con.commit()
-        emit({"deleted": args.id}, cur)
+        if args.last:
+            row = last_logged(con)
+            if not row:
+                raise SystemExit("nothing logged in the chat to undo")
+            con.execute("DELETE FROM tx WHERE id = ?", (row["id"],))
+            con.commit()
+            emit({"deleted": row["id"], "was": row}, cur)
+        elif args.id is None:
+            raise SystemExit("delete needs an id, or --last for the newest row logged")
+        else:
+            row = get_tx(con, args.id)
+            con.execute("DELETE FROM tx WHERE id = ?", (args.id,))
+            con.commit()
+            emit({"deleted": args.id, "was": row}, cur)
+
+    elif args.cmd == "edit":
+        if args.amount is not None:
+            refuse_symbol_in_amount(args.amount)
+        result = edit_tx(
+            con, args.id,
+            when=resolve_on(con, args.on),
+            amount_cents=parse_amount(args.amount) if args.amount is not None else None,
+            kind=args.kind, category=args.category, note=args.note,
+            method=normalise_method(args.via) if args.via is not None else None)
+        for side in ("before", "after"):
+            result[side]["amount_fmt"] = fmt(result[side]["amount_cents"], cur)
+        emit(result, cur)
+
+    elif args.cmd == "balance":
+        if args.bcmd == "set":
+            refuse_symbol_in_amount(args.amount)
+            anchor = set_balance(con, parse_amount(args.amount),
+                                 when=resolve_on(con, args.on))
+            emit({"anchor_cents": anchor["cents"], "anchor_day": anchor["day"],
+                  **{k: v for k, v in balance(con).items() if k != "due_soon"}}, cur)
+        else:
+            emit({**balance(con), "currency": cur}, cur)
+
+    elif args.cmd == "card":
+        if args.ccmd == "pay":
+            refuse_symbol_in_amount(args.amount)
+            tid = pay_card(con, parse_amount(args.amount),
+                           when=resolve_on(con, args.on), note=args.note)
+            emit({"id": tid, "paid_cents": parse_amount(args.amount),
+                  "kind": "transfer", "day": get_tx(con, tid)["day_local"],
+                  **card_open(con),
+                  "note": "not spending: settles card purchases already recorded"},
+                 cur)
+        elif args.ccmd == "set":
+            emit(set_card(con, args.name, normalise_method(args.method)), cur)
+        elif args.ccmd == "list":
+            emit({"cards": cards(con), "default": "credit"}, cur)
+        else:
+            emit({**card_open(con), "currency": cur}, cur)
+
+    elif args.cmd == "budget":
+        if args.bucmd == "set":
+            refuse_symbol_in_amount(args.amount)
+            set_budget(con, args.category, parse_amount(args.amount))
+        elif args.bucmd == "remove":
+            remove_budget(con, args.category)
+        result = budgets(con)
+        for b in result["budgets"]:
+            for k in ("limit_cents", "spent_cents", "left_cents", "projected_cents"):
+                if b.get(k) is not None:
+                    b[k.replace("_cents", "_fmt")] = fmt(b[k], cur)
+        emit({**result, "currency": cur}, cur)
+
+    elif args.cmd == "week":
+        result = week(con)
+        if result["top_category"]:
+            result["top_category"]["total_fmt"] = fmt(
+                result["top_category"]["total_cents"], cur)
+        emit({**result, "currency": cur}, cur)
+
+    elif args.cmd == "export":
+        emit(export_csv(con, args.month), cur)
 
     elif args.cmd == "fixed":
         if args.fcmd == "add":
