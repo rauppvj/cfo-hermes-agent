@@ -579,6 +579,29 @@ def add_tx(con, amount_cents, kind, category, note="", source="chat", when=None,
     return cur.lastrowid
 
 
+# The two channels a phone forwards a purchase on. One purchase can arrive on
+# BOTH -- a tap in Wallet and, seconds later, the bank's SMS about the same
+# charge -- and nobody typed either, so nobody is there to notice the double.
+FORWARDED = {"wallet": "sms", "sms": "wallet"}
+FORWARDED_WINDOW_MIN = 20
+
+
+def forwarded_twin(con, cents: int, source: str, minutes: int = FORWARDED_WINDOW_MIN):
+    """A row for the same amount, from the OTHER forwarding channel, minutes ago.
+
+    Only across channels: two R$ 5,00 coffees tapped ten minutes apart are two
+    coffees, and both stay. A tap and an SMS for one R$ 5,00 are one coffee.
+    """
+    other = FORWARDED.get(source)
+    if not other:
+        return None
+    since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    return con.execute(
+        "SELECT id, day_local, note, source FROM tx WHERE amount_cents = ?"
+        " AND kind = 'expense' AND source = ? AND created_utc >= ?"
+        " ORDER BY id DESC LIMIT 1", (cents, other, since)).fetchone()
+
+
 def get_tx(con, tid: int) -> dict:
     row = con.execute("SELECT * FROM tx WHERE id = ?", (tid,)).fetchone()
     if not row:
@@ -1698,6 +1721,14 @@ def main(argv=None) -> int:
         method = (normalise_method(args.via) if args.via
                   else method_of_card(con, args.card) if args.card
                   else "debit")
+        twin = forwarded_twin(con, cents, args.source) if args.kind == "expense" else None
+        if twin:
+            emit({"skipped": True, "duplicate_of": twin["id"],
+                  "amount_cents": cents, "already_logged_from": twin["source"],
+                  "note": twin["note"],
+                  "say": "already recorded from the other channel; reply "
+                         "with nothing, or one word"}, cur)
+            return 0
         tid = add_tx(con, cents, args.kind, args.category, args.note, args.source,
                      when=when, method=method)
         stamped = get_tx(con, tid)

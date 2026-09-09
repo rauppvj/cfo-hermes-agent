@@ -8,7 +8,7 @@ that was really a net -- each a formatted, sourced, plausible number.
 
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -389,3 +389,28 @@ def test_simulate_says_what_the_account_would_hold_after_the_first_instalment(mo
     s = mod.simulate(con, 120000, installments=3, today=at(2026, 9, 8, 10))
     assert s["balance_now_cents"] == 100000
     assert s["balance_after_first_cents"] == 100000 - 40000
+
+
+# -- one purchase, two channels ---------------------------------------------------
+
+def test_a_tap_and_the_banks_sms_for_the_same_charge_are_one_row(mod, con):
+    mod.add_tx(con, 1490, "expense", "food", source="wallet", note="Padaria")
+    assert mod.forwarded_twin(con, 1490, "sms")["source"] == "wallet"
+    assert mod.forwarded_twin(con, 1490, "wallet") is None       # same channel: kept
+    assert mod.forwarded_twin(con, 1490, "chat") is None         # typed: never deduped
+    assert mod.forwarded_twin(con, 1500, "sms") is None          # a different amount
+    # a twin from twenty-one minutes ago is a different purchase
+    con.execute("UPDATE tx SET created_utc = ?",
+                ((datetime.now(timezone.utc) - timedelta(minutes=21)).isoformat(timespec="seconds"),))
+    con.commit()
+    assert mod.forwarded_twin(con, 1490, "sms") is None
+
+
+def test_the_cli_skips_the_twin_and_says_so(mod, con, capsys, monkeypatch):
+    import money as m
+    m.main(["add", "14,90", "--category", "food", "--note", "Padaria", "--source", "wallet"])
+    capsys.readouterr()
+    m.main(["add", "14,90", "--category", "food", "--note", "Compra aprovada", "--source", "sms"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["skipped"] is True and out["already_logged_from"] == "wallet"
+    assert con.execute("SELECT COUNT(*) FROM tx").fetchone()[0] == 1

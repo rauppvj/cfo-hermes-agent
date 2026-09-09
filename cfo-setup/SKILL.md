@@ -139,14 +139,26 @@ card's name.
 ## The autopilot: stop typing purchases
 
 When the owner says logging is tedious, or asks whether it can see their
-purchases by itself, there is a real answer, and it takes three minutes on
-their iPhone: a Shortcuts automation that texts you every Wallet tap. The
-steps are in the repo at `docs/AUTOPILOT.md`
-(https://github.com/rauppvj/cfo-hermes-agent/blob/main/docs/AUTOPILOT.md).
-Send the link and the one-line summary — *"cada compra no Apple Pay chega
-aqui sozinha, e eu anoto"* — and what it does not cover (pix, boleto, the
-physical card). Offer it **once**, when it is relevant; it is not part of
-setup.
+purchases by itself, there is a real answer, and it is two taps plus one
+step on their iPhone. Two shortcuts are built and signed in the repo; each
+one texts you a purchase the moment it happens:
+
+- **Apple Pay** — every card tap in Wallet, in a shop or online:
+  https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/shortcuts/cfo-apple-pay.shortcut
+- **the bank's SMS** — every purchase the bank texts about, Apple Pay or not:
+  https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/shortcuts/cfo-bank-sms.shortcut
+
+Send both links in one message, with the one-line summary — *"cada compra
+chega aqui sozinha, e eu anoto"* — and the one thing iOS will not let a link
+do: the **automation** (the trigger) they create by hand, once, as
+*Automation → Transaction (or Wallet) / Message → Run Shortcut → cfo*. The
+full page, with the QR codes and what it does not cover (push-only bank
+apps, pix, boleto), is
+https://github.com/rauppvj/cfo-hermes-agent/blob/main/docs/AUTOPILOT.md.
+
+On install the shortcut asks for the number they text you at; if they ask
+which number that is, it is the one they sent the activation code to. Offer
+all this **once**, when it is relevant; it is not part of setup.
 
 Photos work too: a receipt or a Pix confirmation sent as an image is read and
 logged after one confirmation (cfo-log).
