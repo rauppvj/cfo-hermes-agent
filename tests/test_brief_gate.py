@@ -18,6 +18,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -126,6 +127,20 @@ def test_the_setter_refuses_an_hour_that_is_not_one(gate, con):
 
 # -- the two promises to the scheduler ------------------------------------
 
+# A REAL IANA zone, never the machine's own offset. `str(datetime.now()
+# .astimezone().tzinfo)` is "-03" on macOS, which ZoneInfo refuses -- and the
+# gate closes on a zone it cannot resolve. Both tests below then passed or
+# failed for a reason that had nothing to do with the hour they were about: the
+# closed-hour one was green because the zone was broken, and the open-hour one
+# could never go green at all. A test whose subject is which HOUR opens the gate
+# has to hand it a zone that resolves.
+ZONE = "America/Sao_Paulo"
+
+
+def _now_there():
+    return datetime.now(ZoneInfo(ZONE))
+
+
 def _run(tmp_path):
     """The gate exactly as the scheduler runs it: no argv, CFO_DATA in env."""
     return subprocess.run(
@@ -151,9 +166,9 @@ def test_a_closed_hour_prints_the_gate_and_exits_zero(tmp_path):
     SUCCEEDED (`if _ran_ok and not _parse_wake_gate(...)`), so a non-zero exit
     is not a closed gate -- it is an open one.
     """
-    now = datetime.now().astimezone()
-    closed = (now.hour + 6) % 24                 # far from now in any zone
-    _ledger(tmp_path, timezone=str(now.tzinfo), brief_hour=str(closed),
+    now = _now_there()
+    closed = (now.hour + 6) % 24                 # far from now in that zone
+    _ledger(tmp_path, timezone=ZONE, brief_hour=str(closed),
             night_brief_hour="off")
 
     r = _run(tmp_path)
@@ -174,8 +189,8 @@ def test_a_broken_ledger_closes_the_gate_and_still_exits_zero(tmp_path):
 
 
 def test_an_open_hour_wakes_the_agent_and_says_which_brief(tmp_path):
-    now = datetime.now().astimezone()
-    _ledger(tmp_path, timezone=str(now.tzinfo), brief_hour=str(now.hour),
+    now = _now_there()
+    _ledger(tmp_path, timezone=ZONE, brief_hour=str(now.hour),
             night_brief_hour="off")
 
     r = _run(tmp_path)
