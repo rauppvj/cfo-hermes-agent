@@ -579,27 +579,68 @@ def add_tx(con, amount_cents, kind, category, note="", source="chat", when=None,
     return cur.lastrowid
 
 
-# The two channels a phone forwards a purchase on. One purchase can arrive on
-# BOTH -- a tap in Wallet and, seconds later, the bank's SMS about the same
-# charge -- and nobody typed either, so nobody is there to notice the double.
-FORWARDED = {"wallet": "sms", "sms": "wallet"}
+# The channels a purchase is forwarded on without anyone typing: a Wallet tap
+# from the phone, the bank's SMS from the phone, the bank's push notification
+# mirrored to the Mac. One purchase can arrive on two or three of them within
+# a minute, and nobody is there to notice the double.
+FORWARDED = ("wallet", "sms", "push")
 FORWARDED_WINDOW_MIN = 20
 
 
 def forwarded_twin(con, cents: int, source: str, minutes: int = FORWARDED_WINDOW_MIN):
-    """A row for the same amount, from the OTHER forwarding channel, minutes ago.
+    """A row for the same amount, from ANOTHER forwarding channel, minutes ago.
 
     Only across channels: two R$ 5,00 coffees tapped ten minutes apart are two
     coffees, and both stay. A tap and an SMS for one R$ 5,00 are one coffee.
     """
-    other = FORWARDED.get(source)
-    if not other:
+    if source not in FORWARDED:
         return None
+    others = [s for s in FORWARDED if s != source]
     since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
     return con.execute(
-        "SELECT id, day_local, note, source FROM tx WHERE amount_cents = ?"
-        " AND kind = 'expense' AND source = ? AND created_utc >= ?"
-        " ORDER BY id DESC LIMIT 1", (cents, other, since)).fetchone()
+        "SELECT id, day_local, note, source, method, category FROM tx"
+        " WHERE amount_cents = ? AND kind = 'expense' AND source IN (?, ?)"
+        " AND created_utc >= ? ORDER BY id DESC LIMIT 1",
+        (cents, *others, since)).fetchone()
+
+
+def record_forwarded(con, cents: int, kind: str, category: str, note: str,
+                     source: str, method: str | None = None,
+                     card: str | None = None, when=None) -> dict:
+    """Log a purchase the phone or the Mac forwarded, once, with the right method.
+
+    The bank's own text is the authority on DÉBITO vs CRÉDITO -- in Brazil one
+    card is both, and a Wallet tap does not say which function was used. So
+    when the bank's alert arrives after the tap for the same amount, the tap's
+    row is not duplicated: it is CORRECTED to what the bank said. `method`
+    here is the explicit reading (None when the text said nothing); a tap
+    with nothing explicit falls back to what the named card was set to, else
+    credit.
+    """
+    resolved = method or (method_of_card(con, card) if card else "credit")
+    if kind == "expense":
+        twin = forwarded_twin(con, cents, source)
+        if twin:
+            updated = False
+            if method and twin["method"] != method:
+                con.execute("UPDATE tx SET method = ? WHERE id = ?", (method, twin["id"]))
+                con.commit()
+                updated = True
+            return {"skipped": True, "duplicate_of": twin["id"],
+                    "already_logged_from": twin["source"],
+                    "amount_cents": cents, "note": twin["note"],
+                    "category": twin["category"],
+                    "method": method if updated else twin["method"],
+                    "method_updated": updated,
+                    "say": ("already recorded from the other channel"
+                            + (" -- its method is now " + method if updated else "")
+                            + "; reply with nothing, or one word")}
+    tid = add_tx(con, cents, kind, category, note=note, source=source,
+                 when=when, method=resolved)
+    row = get_tx(con, tid)
+    return {"id": tid, "amount_cents": cents, "kind": kind, "method": row["method"],
+            "category": row["category"], "note": row["note"], "day": row["day_local"],
+            "source": source, "skipped": False}
 
 
 def get_tx(con, tid: int) -> dict:
@@ -1721,13 +1762,19 @@ def main(argv=None) -> int:
         method = (normalise_method(args.via) if args.via
                   else method_of_card(con, args.card) if args.card
                   else "debit")
-        twin = forwarded_twin(con, cents, args.source) if args.kind == "expense" else None
-        if twin:
-            emit({"skipped": True, "duplicate_of": twin["id"],
-                  "amount_cents": cents, "already_logged_from": twin["source"],
-                  "note": twin["note"],
-                  "say": "already recorded from the other channel; reply "
-                         "with nothing, or one word"}, cur)
+        if args.source in FORWARDED:
+            got = record_forwarded(
+                con, cents, args.kind, args.category, args.note, args.source,
+                method=normalise_method(args.via) if args.via else None,
+                card=args.card, when=when)
+            if got["skipped"]:
+                emit(got, cur)
+                return 0
+            month = got["day"][:7]
+            emit({**got, **{k: v for k, v in month_totals(con, month).items()
+                            if k != "month"}, "month": month,
+                  "card_open_cents": card_open(con)["card_open_cents"]}, cur)
+            refresh_panel(con)
             return 0
         tid = add_tx(con, cents, args.kind, args.category, args.note, args.source,
                      when=when, method=method)

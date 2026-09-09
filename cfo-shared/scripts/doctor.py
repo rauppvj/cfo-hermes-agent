@@ -42,8 +42,8 @@ SKILLS = ("cfo-shared", "cfo-log", "cfo-ask", "cfo-simulate", "cfo-brief",
           "cfo-setup", "cfo-import", "cfo-panel")
 # Copied into $HERMES_HOME/scripts by the deploy hook; a stale copy runs the
 # old schedule or the old report, silently.
-DEPLOYED = ("brief_gate.py", "panel.py", "usage_report.sh")
-CRON_JOBS = ("cfo-brief", "cfo-panel", "cfo-usage")
+DEPLOYED = ("brief_gate.py", "notify_gate.py", "panel.py", "usage_report.sh")
+CRON_JOBS = ("cfo-brief", "cfo-panel", "cfo-usage", "cfo-notify")
 # A line the SOUL.md this repo ships has and the image's default does not.
 SOUL_MARK = "You do not do arithmetic"
 
@@ -196,6 +196,20 @@ def run(home: Path) -> list[dict]:
         out.append(check("panel", True,
                          "not rendered yet -- appears after the first ledger "
                          "write or the next panel tick"))
+
+    # 8b. the push channel: is the Mac forwarding anything?
+    inbox = home / "inbox" / "notifications.jsonl"
+    if inbox.is_file():
+        try:
+            lines = [l for l in inbox.read_text(errors="replace").splitlines() if l.strip()]
+            last_ts = (json.loads(lines[-1]).get("ts") or "?")[:16] if lines else "never"
+            out.append(check("push inbox", True,
+                             f"{len(lines)} notification(s) forwarded, last {last_ts}"))
+        except Exception as exc:                 # noqa: BLE001
+            out.append(check("push inbox", False, f"unreadable: {exc}"))
+    else:
+        out.append(check("push inbox", True,
+                         "not set up -- optional; scripts/install-notify.sh on the Mac"))
 
     # 9. the Agent Index: registered, and the last report landed
     client = home / "scripts" / "agent_index_client.py"

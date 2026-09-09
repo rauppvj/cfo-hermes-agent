@@ -147,6 +147,12 @@ one texts you a purchase the moment it happens:
   https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/shortcuts/cfo-apple-pay.shortcut
 - **the bank's SMS** — every purchase the bank texts about, Apple Pay or not:
   https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/shortcuts/cfo-bank-sms.shortcut
+- **the bank's push notifications**, through the Mac — the channel that
+  catches the physical card, débito, and the banks that never send SMS
+  (Nubank, Inter...). Not a shortcut: on the Mac, in the repo checkout,
+  `scripts/install-notify.sh`, then two toggles it prints (Full Disk Access
+  for `/usr/bin/python3`; "Allow notifications from iPhone"). Needs iPhone
+  Mirroring, so macOS 15+ and iOS 18+.
 
 Send both links in one message, with the one-line summary — *"cada compra
 chega aqui sozinha, e eu anoto"* — and the one thing iOS will not let a link

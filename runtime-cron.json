@@ -22,5 +22,15 @@
     "script": "usage_report.sh",
     "no_agent": true,
     "deliver": "local"
+  },
+  {
+    "name": "cfo-notify",
+    "schedule": "*/5 * * * *",
+    "script": "notify_gate.py",
+    "prompt": "The script output above lists bank notifications the owner's Mac forwarded. Lines marked ✓ and = were already recorded by code: do NOT log them again. Reply with ONE line, in the language named, saying what was recorded. Run commands with the terminal tool. Never invent an amount.",
+    "skills": [
+      "cfo-log"
+    ],
+    "deliver": "plow_chat:${PLOW_HOME_CHANNEL}"
   }
 ]

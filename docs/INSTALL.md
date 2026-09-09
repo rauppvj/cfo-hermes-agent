@@ -122,8 +122,10 @@ as an attachment — CSV, or a PDF where your bank offers no export — and it
 imports. Credit-card invoices too; they are a different document and are parsed
 as one.
 
-**Stop typing purchases at all.** Three minutes in your iPhone's Shortcuts app
-and every card tap reaches the agent by itself: [`AUTOPILOT.md`](AUTOPILOT.md).
+**Stop typing purchases at all.** Two shortcuts on the iPhone catch every
+card tap and every purchase the bank texts about; a watcher on this Mac
+(`scripts/install-notify.sh`) catches the bank's push notifications — the
+physical card, débito, Pix. [`AUTOPILOT.md`](AUTOPILOT.md).
 
 ### The two briefs
 

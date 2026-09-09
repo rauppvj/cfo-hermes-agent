@@ -270,6 +270,10 @@ The same month is also a page on this Mac, redrawn on every change:
 Put it full-screen on a spare monitor or an old tablet and it stays current
 on its own.
 
+To stop typing purchases -- card taps, the bank's SMS, the bank's push
+notifications through this Mac -- see docs/AUTOPILOT.md, and for the push
+channel run:  scripts/install-notify.sh $NAME
+
     agent-mgr logs $NAME          follow it
     agent-mgr restart $NAME       after changing anything in this checkout
 

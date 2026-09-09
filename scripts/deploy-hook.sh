@@ -26,11 +26,11 @@ set -eu
 : "${AGENT_HOME:?deploy hook needs AGENT_HOME -- agent-mgr sets it}"
 
 mkdir -p "$AGENT_HOME/scripts"
-for f in brief_gate.py panel.py usage_report.sh; do
+for f in brief_gate.py notify_gate.py panel.py usage_report.sh; do
     cp "cfo-shared/scripts/$f" "$AGENT_HOME/scripts/$f"
     chmod 0644 "$AGENT_HOME/scripts/$f"
 done
-echo "deployed brief_gate.py, panel.py and usage_report.sh to $AGENT_HOME/scripts"
+echo "deployed brief_gate.py, notify_gate.py, panel.py and usage_report.sh to $AGENT_HOME/scripts"
 
 # The Agent Index client, which usage_report.sh runs. Fetched rather than
 # vendored: it is somebody else's file, MIT, one script of standard-library

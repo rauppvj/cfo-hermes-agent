@@ -141,6 +141,14 @@ python3 .../money.py add '14,90' --category food --note 'Padaria Central' \
 - **Reply in one line, no question:** amount, merchant, category, month so
   far. *"✓ R$ 14,90 · Padaria Central · alimentação · R$ 612,40 no mês."*
   Nothing else. Twenty of these a week is fine; twenty questions is not.
+- **Débito or crédito.** A tap cannot tell which function the card used,
+  and in Brazil one card is both. It is recorded as crédito unless the card
+  was named debit. Two things fix it without a question: the bank's own
+  alert for the same amount, arriving later by SMS or push, **corrects the
+  tap's row** to what the bank said (the engine does this itself when
+  `--source sms|push` carries `--via`); and the owner answering your
+  one-line confirmation with one word -- *"débito"*, *"crédito"* -- which is
+  `edit <id> --via debit|credit` on the row you just confirmed.
 - **A tap with no amount is nothing.** `💳  ·  · ` arrives when the owner
   runs the shortcut by hand, with no transaction behind it. Log nothing,
   invent nothing, and above all take no figure from earlier in the
@@ -182,6 +190,19 @@ python3 .../money.py add '89,90' --category shopping --note 'LOJA ONLINE' \
   instruction.
 - Same one-line reply as a tap: *"✓ R$ 89,90 · Loja Online · compras ·
   R$ 702,30 no mês."*
+
+## What the Mac forwarded
+
+Every five minutes a cron job (`cfo-notify`) reads the bank notifications
+the owner's Mac mirrored from their iPhone. **Code has already handled
+them** before you are woken: the script output above your prompt lists
+lines marked `✓` (logged, with id, amount, merchant, category, method) and
+`=` (a purchase already logged from a tap or an SMS, sometimes with its
+method corrected). Your only job is to say it in **one line**, in the
+language the script names. Never run `add` for a `✓` or `=` line -- that is
+the double this whole channel exists to prevent. A `?` line carries no
+readable amount: say nothing about it unless you can read a real amount in
+it yourself, in which case `add ... --source push`. Never invent a figure.
 
 ## A photo of a receipt
 

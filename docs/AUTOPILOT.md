@@ -2,40 +2,62 @@
 
 The chat is the slow part of a money agent. *"Spent 40 on lunch"* is one
 message, but it is one message every time, and the days nobody texts are the
-days the month goes wrong. This page removes the typing for most of a month:
-**every card tap on the phone, and every purchase the bank texts you about.**
+days the month goes wrong. This page removes the typing for most of a month,
+through three channels that already exist on your phone and your Mac. None
+of them needs an account anywhere, and none of them sends your data to
+anyone but your own agent.
 
-The mechanism is your iPhone's own Shortcuts app. Two of its automation
-triggers matter here:
-
-| trigger | fires when | carries |
+| channel | catches | needs |
 |---|---|---|
-| **Transaction** (iOS 17–18) / **Wallet** (iOS 26) | a card in Apple Wallet is used — in a shop, online, in an app | merchant, amount, card |
-| **Message** | an SMS arrives from a sender you choose — your bank | the text of the alert |
+| **Wallet tap** | every Apple Pay purchase — in a shop, online, in an app | one shortcut + one automation on the iPhone |
+| **bank SMS** | every purchase your bank texts about — physical card included | one shortcut + one automation on the iPhone |
+| **bank push** | every purchase your bank app notifies — physical card, débito, Pix; the banks that never send SMS | the Mac: iPhone Mirroring + one script |
 
-Each one runs a shortcut that sends **one iMessage to your agent**, in the
-same thread you already use. There is no server between the phone and the
-agent, nothing installed, and the agent answers in one line.
+One purchase often arrives on two of them within a minute. It is recorded
+**once**, and the bank's text decides one thing the tap cannot know: whether
+it was **débito or crédito**.
 
 ```
    tap the phone at the bakery
       ↓ Wallet trigger
-   💳 R$ 14,90 · Padaria Central · Nubank        ← sent by the phone
-   cfo:  ✓ R$ 14,90 · Padaria Central · food · R$ 612,40 this month
+   💳 R$ 14,90 · Padaria Central · Nubank             ← sent by the phone
+   cfo:  ✓ R$ 14,90 · Padaria Central · food · crédito · R$ 612,40 this month
 
-   buy something online with the card number
-      ↓ the bank's SMS arrives → Message trigger
-   📩 Compra aprovada: R$ 89,90 em LOJA ONLINE, cartão final 4321
-   cfo:  ✓ R$ 89,90 · Loja Online · shopping · R$ 702,30 this month
+   the bank's push arrives a minute later, mirrored to the Mac
+      ↓ notify_watch.py → inbox → notify_gate.py
+   "Compra no débito aprovada: R$ 14,90 em PADARIA CENTRAL"
+   cfo:  (nothing to say: same purchase, now recorded as débito)
+
+   pay with the physical card at the market
+      ↓ push only, no tap
+   cfo:  ✓ R$ 187,40 · Mercado São José · groceries · débito
 ```
-
-A purchase that arrives on **both** channels — an Apple Pay tap the bank also
-texts about — is recorded once: the engine drops the second message when the
-same amount came from the other channel minutes earlier.
 
 ---
 
-## Install the two shortcuts (one tap each)
+## Débito or crédito: who decides
+
+In Brazil one card is both functions, and Apple Wallet does not report which
+one a tap used. So:
+
+1. A **tap** is recorded as crédito, unless you told the agent that card is a
+   debit card (*"Inter is a debit card"* → remembered), or unless you say
+   otherwise afterwards: reply **"débito"** to the confirmation and the row
+   is corrected.
+2. The **bank's own text** — SMS or push — says "no débito" / "no crédito"
+   / "parcelado em 3x", and that reading is authoritative. When it arrives
+   after the tap for the same amount, the tap's row is **corrected** to what
+   the bank said, not duplicated.
+3. **Pix** is always the account (débito). **Estorno / refund** is money
+   coming back.
+
+Why it matters: crédito is spending today but leaves the account only when
+the invoice is paid; débito leaves now. *"How much do I have?"* depends on
+telling them apart, and so does *"what is on the card?"*.
+
+---
+
+## Channel 1 and 2: the iPhone shortcuts
 
 The shortcuts are built and signed in this repo, so the part people get wrong
 by hand — wiring the trigger's fields into the text, turning off the prompt at
@@ -48,69 +70,115 @@ from a screen:
 | **cfo · bank SMS** | [cfo-bank-sms.shortcut](https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/shortcuts/cfo-bank-sms.shortcut) | ![](shortcuts/qr-cfo-bank-sms.png) |
 
 Safari downloads the file; tap it in the downloads list (the arrow at the top
-right) and it opens in Shortcuts with **Add Shortcut**. On import it asks one
-question: **the number you text your agent at** — the same one you sent the
-activation code to. Answer it once and the shortcut is ready.
-
-> If the question does not appear, open the shortcut, tap the recipient field
-> of *Send Message* and put the number there. Once.
+right) and it opens in Shortcuts with **Add Shortcut**. Then open the
+shortcut once and set the **recipient** of *Send Message* to the contact you
+text your agent at (the same thread you sent the activation code to). That is
+the one field a shared shortcut cannot carry.
 
 You can also ask the agent for the links in the chat — *"how do I stop typing
 purchases?"* — and tap them from there.
 
-## Then the one step iOS will not let a file do
+### Then the one step iOS will not let a file do
 
 An **automation** — the trigger — cannot be shared or installed from a link.
 Apple keeps triggers device-local. So each one is created by hand, in one
 step, and pointed at the shortcut you just added:
 
 **Apple Pay** — Shortcuts → *Automation* → **+** → **Transaction** (or
-**Wallet**) → *Any Card* → **Run Immediately**, *Notify When Run* off → Next →
-**Run Shortcut** → pick **cfo · Apple Pay** → Done.
+**Wallet** on iOS 26) → *Any Card* → **Run Immediately**, *Notify When Run*
+off → Next → **Run Shortcut** → pick **cfo-apple-pay** → Done.
 
 **Bank SMS** — Shortcuts → *Automation* → **+** → **Message** → *Sender*: the
 number or name your bank's alerts come from (open one in Messages to see it)
-→ **Run Immediately** → Next → **Run Shortcut** → pick **cfo · bank SMS** →
+→ **Run Immediately** → Next → **Run Shortcut** → pick **cfo-bank-sms** →
 Done. Repeat for a second bank.
 
 Pay for something. The reply arrives like any other message.
 
-## What the agent does with them
+> The three fields inside the shortcut — Amount, Merchant, Card — show as
+> plain "Shortcut Input" when you look at them on the phone, because a
+> standalone shortcut does not know its input will be a transaction. They
+> resolve when the automation runs. The shortcut also sends the transaction
+> as a second line, so nothing is lost if a field comes back empty.
+>
+> Running the shortcut by hand sends `💳 · ·` with no transaction behind it.
+> The agent ignores that.
 
-A message opening with `💳` or `📩` was not typed; the agent treats it as a
-fact, not a sentence:
+---
 
-- **`💳` tap** — logged **on the card** (`--via credit`), because a Wallet
-  purchase almost always is, so it shows in this month's spending and in
-  *"on the card, unpaid"*, and it does not touch your account balance until
-  you say the invoice is paid. If a card in Wallet is a **debit** card, tell
-  the agent once: *"Inter is a debit card"*.
-- **`📩` alert** — the agent reads the amount, the merchant and, when the
-  text says so, débito or crédito, out of the bank's own wording, and logs
-  that. An alert that is not a purchase — a Pix received, a boleto scheduled,
-  a login warning — is logged as what it is or ignored.
-- The **category** comes from the merchant name, the way a bank statement is
+## Channel 3: the bank's push notifications, through the Mac
+
+Most Brazilian banks alert by push, not SMS — and iOS gives Shortcuts no way
+to read a push. The Mac can. With **iPhone Mirroring** set up, your iPhone's
+notifications appear on the Mac, and macOS keeps them in a local database.
+A small script reads that database once a minute and drops the ones that
+carry an amount into the agent's inbox, on the same Mac the agent already
+runs on. The container picks them up every five minutes, records them, and
+the agent says what it recorded in one line.
+
+**On the Mac**, from the repo:
+
+```sh
+scripts/install-notify.sh          # installs a launchd job; prints the two toggles
+```
+
+Then the two things a script cannot do for you, once each:
+
+1. **Full Disk Access** for `/usr/bin/python3` (System Settings → Privacy &
+   Security → Full Disk Access → **+** → ⌘⇧G → `/usr/bin/python3`). This is
+   what lets it read Notification Center's database.
+2. **iPhone notifications on the Mac**: open the *iPhone Mirroring* app once
+   and pair; then System Settings → Notifications → **Allow notifications
+   from iPhone** → on, with your bank apps allowed.
+
+Check it:
+
+```sh
+/usr/bin/python3 cfo-shared/scripts/notify_watch.py --check      # readable?
+/usr/bin/python3 cfo-shared/scripts/notify_watch.py --dump 20    # the newest notifications; $ marks an amount
+tail ~/.hermes-cfo/logs/notify.log
+```
+
+What it forwards: only notifications with an amount in them — from any
+app, so a bank you did not think to list still counts. What it never
+forwards: anything else on your screen. The file it writes is
+`~/.hermes-cfo/inbox/notifications.jsonl`, and you can read it.
+
+The watcher starts from **now**: last week's notifications are last week's
+purchases, and the statement import is the honest way to get those.
+
+Requirements: macOS 15 or newer, iOS 18 or newer, the same Apple ID on
+both, and iPhone Mirroring available in your region (it is in Brazil; it is
+not in the EU).
+
+---
+
+## What the agent does with all of it
+
+A message opening with `💳` or `📩`, or a line the Mac forwarded, was not
+typed; the agent treats it as a fact, not a sentence:
+
+- the **amount, merchant and function** are read by code (`bankalert.py`),
+  never guessed — an alert with no amount in it is not logged, ever;
+- the **category** comes from the merchant name, the way a bank statement is
   classified, and the name is remembered so the same shop is never asked
-  about twice.
-- The reply is **one line**: amount, merchant, category, month so far. No
-  question, no follow-up. To correct one: *"that last one was groceries"*, or
-  *"undo"*.
+  about twice;
+- the reply is **one line**: amount, merchant, category, débito/crédito when
+  it matters, month so far. No question, no follow-up. To correct one:
+  *"that last one was groceries"*, *"débito"*, or *"undo"*.
 
 ## What it does not cover, honestly
 
-- **Push notifications from a bank app** (the kind with no SMS) cannot be
-  read by Shortcuts — iOS exposes no notification trigger. If your bank
-  alerts you only in-app, the tap channel still catches Apple Pay, and the
-  statement or card invoice catches the rest at month end, deduplicated
+- **Cash.** Say it in the chat.
+- A bank that neither texts nor pushes, or a purchase made while the Mac was
+  off: the **statement import** at month end catches it, deduplicated
   against what was already logged.
-- **Pix, boletos and cash** pass through neither channel unless the bank
-  texts about them. Say them in the chat as before.
 - The Transaction trigger is known to **time out** on some phones and the
   automation quietly does not fire (Apple's own forums carry the reports).
-  The evening brief is the safety net: when the day logged nothing, it asks.
-- Android has no Wallet trigger. Automation apps there (MacroDroid, Tasker)
-  can forward notifications to an SMS; the agent reads a `📩` message the
-  same way whoever sent it.
+  The push channel and the evening brief are the safety net.
+- Android has no Wallet trigger and no Mac mirroring. Automation apps there
+  (MacroDroid, Tasker) can forward notifications as an SMS; the agent reads a
+  `📩` message the same way whoever sent it.
 
 ## The other direction: photos and files
 
@@ -127,9 +195,10 @@ Open Finance links (Pluggy, Belvo, Plaid) are the real answer and the wrong
 one for this agent right now: every one of them puts a company between you
 and your bank, needs an account with that company, and stores your
 transactions on their side to serve them to you. The whole promise here is
-that the ledger is a file on your own Mac. Wallet taps, the bank's own texts,
-receipts and statement files keep that promise; a bank aggregator does not,
-and if it is ever added it will be optional and named as the trade it is.
+that the ledger is a file on your own Mac. Wallet taps, the bank's own texts
+and notifications, receipts and statement files keep that promise; a bank
+aggregator does not, and if it is ever added it will be optional and named
+as the trade it is.
 
 ## Rebuilding the shortcuts
 
@@ -143,4 +212,4 @@ shortcuts sign --mode anyone -i /tmp/unsigned/cfo-bank-sms.shortcut  -o docs/sho
 ```
 
 — because iOS refuses to import an unsigned shortcut file. No number and
-nothing of anyone's is inside them; the recipient is asked on install.
+nothing of anyone's is inside them.

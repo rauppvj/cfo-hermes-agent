@@ -114,12 +114,15 @@ as spending on top of the purchases it settled. Both are fields now.
 The chat is the slow part of a money agent, so most of the month should
 arrive without typing:
 
-- **Every card tap, and every purchase the bank texts about.** Two signed
-  iPhone shortcuts ship in the repo — install by link or QR, answer one
-  question, create the trigger in one step. A Wallet tap arrives as
-  `💳 amount · merchant · card`, the bank's SMS as `📩 <the alert>`; the agent
-  logs each in one line and records a purchase that came on both channels
-  once. [`docs/AUTOPILOT.md`](docs/AUTOPILOT.md).
+- **Every card tap, every purchase the bank texts about, and every one it
+  pushes.** Two signed iPhone shortcuts ship in the repo (install by link or
+  QR, set the recipient, create the trigger in one step) for Wallet taps and
+  the bank's SMS; and a one-minute watcher on the Mac reads the iPhone's
+  mirrored push notifications — the channel that catches the physical card,
+  débito, Pix, and the banks that never send SMS. The bank's own text is read
+  by code, never guessed; a purchase that arrives on two channels is recorded
+  once, and the bank's "débito" corrects the tap's "crédito".
+  [`docs/AUTOPILOT.md`](docs/AUTOPILOT.md).
 - **A photo of the receipt.** Send the image; the agent reads the total, the
   merchant and the date, and confirms the one line it is about to write.
 - **The statement, at month end.** Send the bank's CSV or PDF as an
