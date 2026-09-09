@@ -83,12 +83,25 @@ def run(home: Path) -> list[dict]:
 
     # 3. this repo's SOUL.md, not the image's
     soul = home / "SOUL.md"
-    has_mark = soul.is_file() and SOUL_MARK in soul.read_text(errors="replace")
-    out.append(check(
-        "soul", has_mark,
-        "the cfo SOUL.md is in place" if has_mark else
-        f"{soul} is {'missing' if not soul.is_file() else 'not this agent’s'}",
-        "the SOUL.md bind is not landing; see compose.override.yml"))
+    try:
+        text = soul.read_text(errors="replace")
+        has_mark = SOUL_MARK in text
+        out.append(check(
+            "soul", has_mark,
+            "the cfo SOUL.md is in place" if has_mark else "not this agent’s",
+            "the SOUL.md bind is not landing; see compose.override.yml"))
+    except OSError as exc:
+        # A single-file bind mount keeps pointing at the inode it was made
+        # from. `git pull` writes a new file, the old one is unlinked, and the
+        # container is left with a path that stats and cannot be opened --
+        # the gateway then boots with no persona at all. Only a restart
+        # re-binds it, and nothing else reports it.
+        out.append(check(
+            "soul", False,
+            f"{soul} cannot be read ({exc.strerror}) -- the host file was "
+            "replaced under a single-file bind",
+            "restart the container: `agent-mgr restart <name>` (or `docker "
+            "restart <container>`) re-binds it"))
 
     # 4. the ledger
     try:
