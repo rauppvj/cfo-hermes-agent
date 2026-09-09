@@ -8,7 +8,10 @@ as a file on your own machine.
 A [Hermes](https://howto.plow.co/hermes) agent, texted through
 [Plow Chat](https://plow.co) and installed with one command. Optionally drives
 your own Mac through [Plow Latch](https://plow.co/latch). Deployed with
-[`plow-pbc/agent-mgr`](https://github.com/plow-pbc/agent-mgr).
+[`plow-pbc/agent-mgr`](https://github.com/plow-pbc/agent-mgr) — which carries a
+deprecation notice in favour of
+[`plow-agents`](https://github.com/plow-pbc/plow-agents) and still owns
+container lifecycle, so it is what `install.sh` uses and what it should use.
 
 ```
 you   spent 40 on lunch
