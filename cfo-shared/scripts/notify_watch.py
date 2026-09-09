@@ -191,7 +191,11 @@ def main(argv=None) -> int:
             print(FDA_HINT.format(exe=sys.executable), file=sys.stderr)
         else:
             print(f"notify_watch: {exc}", file=sys.stderr)
-        return 0
+        # Zero for launchd, which would otherwise back off a "failing" job;
+        # non-zero for --check, whose whole job is to be gated on. The first
+        # installer printed "readable" over an exit code of 0 with the real
+        # answer on a stderr it had silenced.
+        return 1 if args.check else 0
 
 
 if __name__ == "__main__":
