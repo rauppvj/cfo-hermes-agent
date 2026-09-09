@@ -1,12 +1,37 @@
-# The builder name, and why this agent shows as "Anonymous Builder"
+# The builder name, and why this agent showed as "Anonymous Builder"
 
-**Status as of 2026-09-04:** unresolved, and not resolvable from here. Waiting
-to see whether upstream notices before launch; if not, raise it with the Index
-maintainer directly.
+**Status: RESOLVED on 2026-09-09.** Upstream opened the endpoint. The name is
+set and the page renders it; the rest of this file is kept as the account of
+what was actually wrong, because the shape of it recurs.
 
-The `cfo` page on the Agent Index is complete except for one thing: where it
-should say who built it, it says *"built by an anonymous builder"*. The blurb,
-repo, runtime and screenshot are all correct.
+## How it was fixed
+
+`PATCH /v1/auth/profile` now accepts the container's own `PLOW_AGENT_TOKEN` —
+the same credential the table below records as 403. Nothing here changed; the
+scope did.
+
+```sh
+TOK=$(grep '^PLOW_AGENT_TOKEN=' ~/.hermes-cfo/.env | cut -d= -f2-)
+curl -X PATCH -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
+     -d '{"display_name":"Vinicius"}' https://api.plow.co/v1/auth/profile
+```
+
+`GET` the same path first to see what Plow holds. There is also a CLI for it in
+[`plow-pbc/plow-agents`](https://github.com/plow-pbc/plow-agents) — `plow-agents
+profile --name … --photo …`, added 2026-09-04 — which takes a **local file** for
+the photo and uploads it. That one needs an account token from `plow-agents
+login`, texted from the owner's phone; the curl above needs nothing new.
+
+No redeploy and no re-registration: the index resolves the profile per request,
+so the page picked the name up in seconds.
+
+---
+
+## What it was (kept, 2026-09-04)
+
+The `cfo` page on the Agent Index was complete except for one thing: where it
+should say who built it, it said *"built by an anonymous builder"*. The blurb,
+repo, runtime and screenshot were all correct.
 
 ## What changed
 
@@ -39,7 +64,7 @@ The site's own source states the rule:
 So the name did not get lost or corrupted. **Its source was replaced**, from a
 field this repo filled in to a profile that was never filled in.
 
-## Why it cannot be fixed from here
+## Why it could not be fixed from here, until it could
 
 The Plow profile is written with `PATCH /v1/auth/profile`
 (`{"display_name": ..., "photo_url": ...}`). That endpoint requires the `*:*`
@@ -80,36 +105,16 @@ name; accounts created by SMS activation after it have no way to get one.**
 Every builder who joins from now on is permanently anonymous on the page the
 hackathon is judged on.
 
-## The message to send
+## The message that was drafted, and never needed sending
 
-English, for an issue or a note to the maintainers:
+Two drafts lived here — one English, one Portuguese — asking the maintainers how
+a builder was meant to fill in a profile at all. They are cut now that the
+answer is "the same token you already had". Kept only as the lesson: the gap was
+real and was closed upstream within five days, and the useful move while it was
+open was to write down exactly which credentials had been tried and what each
+one returned, rather than to guess at a workaround.
 
-> The Agent Index identity change on 2026-09-03 leaves new builders with no way
-> to appear under their own name. The page resolves the builder through
-> `GET /v1/auth/index-profiles/{owner_uid}`, but `PATCH /v1/auth/profile`
-> requires the `*:*` scope and returns 403 for every credential an owner holds:
-> the container's `PLOW_AGENT_TOKEN`, `DOMO_MCP_TOKEN`, `PLOW_CHAT_TOKEN`, a
-> freshly minted OTP token from `/v1/auth/otp/verify`, and the Plow assistant
-> itself when asked in chat. There is no web console, and the client's README
-> documents no alternative. Accounts from the GitHub device-flow era have a
-> name and avatar; accounts created by SMS activation have `display_name: null`
-> and show as "Anonymous Builder" with no way out. How is the profile meant to
-> be filled in?
-
-Portuguese, for a direct message:
-
-> A mudança de identidade do Agent Index de 03/09 deixou builders novos sem
-> como aparecer com nome. A página resolve o builder via
-> `GET /v1/auth/index-profiles/{owner_uid}`, mas `PATCH /v1/auth/profile` exige
-> escopo `*:*` e retorna 403 para todas as credenciais que um dono possui: o
-> `PLOW_AGENT_TOKEN` do container, o `DOMO_MCP_TOKEN`, o `PLOW_CHAT_TOKEN`, um
-> token recém-obtido por OTP (`/v1/auth/otp/verify`) e o próprio assistente
-> Plow. Não há console web e o README do client não documenta alternativa.
-> Contas anteriores ao device flow do GitHub têm nome e avatar; as criadas por
-> ativação SMS têm `display_name: null` e ficam permanentemente como "Anonymous
-> Builder". Como preencher o perfil?
-
-## If it gets fixed
+## Checking it
 
 Nothing here needs redeploying. The index resolves the profile per request, so
 the page picks up a name the moment Plow holds one — no re-registration, no

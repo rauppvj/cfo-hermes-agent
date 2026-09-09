@@ -41,11 +41,10 @@ cfo   Anotado: R$ 40,00 em alimentação. Você está em R$ 512,00 esse mês.
 > a chat id, or anybody's transactions. The ledger is a SQLite file in the
 > instance's own home on the host (`~/.hermes-<name>`, mounted into the
 > container at `$HERMES_HOME`), written by the owner's instance and by nothing
-> else. There is
-> no server, no account, and no sign-up: your spending is not sent anywhere
-> to be stored. The language model still sees what you text it, the way any
-> agent does — that is the honest boundary, and it is worth knowing which
-> side of it your data is on.
+> else. There is no server, no account, and no sign-up: your spending is not
+> sent anywhere to be stored. The language model still sees what you text it,
+> the way any agent does — that is the honest boundary, and it is worth knowing
+> which side of it your data is on.
 
 **One repo, one instance per person.** This is not one person's agent that
 someone else copies; each person who runs it gets their own instance, their
@@ -227,10 +226,10 @@ any more: the index resolves the builder from the **Plow profile** behind that
 token, per request, and renders "an anonymous builder" when Plow holds no name.
 A name Plow holds shows up immediately — no re-registration, no deploy.
 
-Getting Plow to hold one is, as of 2026-09-04, not possible for an account
-created after the GitHub device flow was removed: writing the profile needs a
-scope no owner credential has. The evidence, and the report to send upstream,
-are in [`docs/builder-identity.md`](docs/builder-identity.md).
+Getting Plow to hold one was impossible for five days — writing the profile
+needed a scope no owner credential had — and is one `PATCH /v1/auth/profile`
+with the container's own token since 2026-09-09. Both halves are in
+[`docs/builder-identity.md`](docs/builder-identity.md).
 
 > **The identity model changed under this repo twice on 2026-09-03.** It was a
 > GitHub account proven by device flow; then the container's Plow token sent as
