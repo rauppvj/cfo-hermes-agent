@@ -129,10 +129,14 @@ def workflow(actions: list, glyph: int, color: int) -> dict:
 
 def apple_pay() -> dict:
     uid = str(uuid.uuid4()).upper()
+    # Line one: the three named fields. Line two: the transaction itself,
+    # coerced to text, so that if a given iOS build does not resolve the
+    # named properties through "Run Shortcut" the agent still receives what
+    # the trigger knew. The agent reads whichever line carries the figures.
     return workflow([
         text_action(["💳 ", input_property("Amount"), " · ",
                      input_property("Merchant"), " · ",
-                     input_property("Card")], uid),
+                     input_property("Card"), "\n", shortcut_input()], uid),
         send_message_action(uid),
     ], glyph=59680, color=4292093695)
 

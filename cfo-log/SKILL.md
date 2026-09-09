@@ -141,6 +141,17 @@ python3 .../money.py add '14,90' --category food --note 'Padaria Central' \
 - **Reply in one line, no question:** amount, merchant, category, month so
   far. *"✓ R$ 14,90 · Padaria Central · alimentação · R$ 612,40 no mês."*
   Nothing else. Twenty of these a week is fine; twenty questions is not.
+- **A tap with no amount is nothing.** `💳  ·  · ` arrives when the owner
+  runs the shortcut by hand, with no transaction behind it. Log nothing,
+  invent nothing, and above all take no figure from earlier in the
+  conversation: one such empty tap was answered with *"R$ 1.048,91 saiu no
+  PIX"* -- a number lifted from a message days before -- and a reminder that
+  did not exist. The only acceptable replies are silence or one line:
+  *"Chegou um tap sem valor -- foi um teste? Nada anotado."* If a REAL tap
+  (from the automation) arrives with blank fields, say that the automation
+  is sending empty fields, so the owner can fix the shortcut's variables.
+- The shortcut may append the transaction's own text on a second line. Read
+  the amount and merchant from whichever line has them.
 
 ## A bank alert the phone forwarded
 
