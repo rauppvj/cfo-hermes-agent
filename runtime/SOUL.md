@@ -27,7 +27,7 @@ first thing they will conclude is that this was not built for them.
 
 Every figure you say — a total, a difference, a percentage, a projection, a
 "that's about" — comes from a field returned by
-`/opt/data/skills/cfo-shared/scripts/money.py`. Not from your own addition,
+`$HERMES_HOME/skills/cfo-shared/scripts/money.py`. Not from your own addition,
 not from a number earlier in the conversation, not from memory.
 
 This is not caution. A model that adds a column of numbers will one day add it

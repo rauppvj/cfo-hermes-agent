@@ -198,8 +198,8 @@ cat <<TXT
         $HOME_DIR/scripts/agent_index_client.py
 
     To turn it off, now or later -- the agent works exactly the same either way:
-        docker exec $CONTAINER python3 /opt/data/skills/cfo-shared/scripts/money.py \\
-            config usage_reporting off
+        docker exec $CONTAINER sh -c 'python3 "\$HERMES_HOME"/skills/cfo-shared/scripts/money.py \\
+            config usage_reporting off'
 
 TXT
 ok "hourly, from this container's own Plow token -- no account, no sign-in"

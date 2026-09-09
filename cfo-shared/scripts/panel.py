@@ -57,7 +57,12 @@ from pathlib import Path
 # Same two-place import as brief_gate.py, for the same reason: a cron script
 # must be a real file under HERMES_HOME/scripts, where money.py is not a
 # sibling. Trying the sibling first keeps a local run and the tests honest.
+# $HERMES_HOME, not a literal: the home is /opt/data on the base this was
+# written against and /var/lib/hermes on the one a new install gets. The old
+# path stays last so a home that names no HERMES_HOME still resolves.
 for _candidate in (Path(__file__).resolve().parent,
+                   Path(os.environ.get("HERMES_HOME", "/opt/data"),
+                        "skills/cfo-shared/scripts"),
                    Path("/opt/data/skills/cfo-shared/scripts")):
     if (_candidate / "money.py").is_file():
         sys.path.insert(0, str(_candidate))

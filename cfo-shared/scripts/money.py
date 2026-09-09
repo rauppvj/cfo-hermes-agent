@@ -19,8 +19,9 @@ Two invariants hold the rest up:
     instant and the local calendar day, resolved once at write time against
     the configured zone.
 
-State lives in $CFO_DATA (the instance home, mounted at /opt/data), never in
-this repo -- the repo is code only and carries nobody's data.
+State lives in $CFO_DATA -- by default `cfo/` inside $HERMES_HOME, the
+instance's own home in the container -- and never in this repo, which is code
+only and carries nobody's data.
 """
 
 from __future__ import annotations
@@ -45,7 +46,17 @@ DEFAULT_CATEGORIES = [
 
 
 def data_dir() -> Path:
-    return Path(os.environ.get("CFO_DATA", "/opt/data/cfo"))
+    """Where the ledger lives: $CFO_DATA, else `cfo/` inside the agent's home.
+
+    The home is NOT a constant. It is /opt/data on the base this agent was
+    written against and /var/lib/hermes on the one a new install now gets, and
+    the container tells us which through HERMES_HOME. Hard-coding either one
+    puts the ledger somewhere nothing else looks: the panel, the brief gate and
+    the usage report all resolve the same way, so a literal here would split
+    them silently -- an agent answering from an empty ledger beside a full one.
+    """
+    home = os.environ.get("HERMES_HOME", "/opt/data")
+    return Path(os.environ.get("CFO_DATA", f"{home}/cfo"))
 
 
 def db_path() -> Path:

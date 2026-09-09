@@ -16,7 +16,7 @@ and one that lies.
 ## Let the ledger tell you what to ask
 
 ```sh
-python3 /opt/data/skills/cfo-shared/scripts/money.py status
+python3 $HERMES_HOME/skills/cfo-shared/scripts/money.py status
 ```
 
 `status` returns `ready`, and `next_step` — **the single most useful thing to
@@ -45,7 +45,7 @@ recaps, no progress bars, no "step 2 of 4".
 ## Writing the answers
 
 ```sh
-S=/opt/data/skills/cfo-shared/scripts
+S=$HERMES_HOME/skills/cfo-shared/scripts
 python3 $S/money.py config timezone America/Sao_Paulo
 python3 $S/money.py config currency BRL
 

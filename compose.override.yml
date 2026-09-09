@@ -10,33 +10,52 @@
 # repo. AGENT_DIR comes from the registry row, is absolute, and is per-row, so
 # a second person's checkout mounts their own.
 #
-# FLAT, one line per skill, each landing directly under /opt/data/skills. Two
-# quiet mistakes are available here:
+# ${AGENT_HOME_TARGET}, never a literal path -- and this is not a style
+# preference, it is the whole reason a fresh install of this repo worked on
+# 2026-09-03 and did not on 2026-09-08. The boot contract MOVED: HERMES_HOME
+# was /opt/data on the base this repo was written against, and is
+# /var/lib/hermes on the base agent-mgr now resolves for a new agent. agent-mgr
+# derives which one from the image and passes it here; the fallback is the old
+# path, so an instance pinned to the old base keeps mounting where it always
+# did.
 #
-#   - Mounting one directory AT /opt/data/skills. That is where
-#     `agent-mgr deploy` installs the fleet skills (google-workspace,
-#     plow-invite), so a mount over it shadows them silently.
-#   - Nesting these under a subdirectory. Every SKILL.md here names the
-#     absolute path /opt/data/skills/cfo-shared/scripts/money.py, so the
-#     bundles only resolve as siblings directly under /opt/data/skills.
+# The failure this prevents is silent in the worst way. Mounted at a literal
+# /opt/data on a current-contract image, every mount below still SUCCEEDS --
+# Docker creates the directory -- and the gateway, reading /var/lib/hermes,
+# finds none of it. The agent boots, answers the phone, and is not this agent:
+# no ledger skills, no SOUL.md, and every absolute path in every SKILL.md
+# pointing into a directory nothing reads. Verified on 2026-09-08 by
+# registering this repo against a clean agent-mgr clone and rendering
+# `agent-mgr compose <name> config`: eight skills and SOUL.md landing under
+# /opt/data with the home bound at /var/lib/hermes.
+#
+# FLAT, one line per skill, each landing directly under $HERMES_HOME/skills.
+# Two quiet mistakes are available here:
+#
+#   - Mounting one directory AT $HERMES_HOME/skills. That shadows whatever the
+#     image or the deploy put there -- the seed skills the current base bundles
+#     (google-workspace, plow-invite) among them.
+#   - Nesting these under a subdirectory. Every SKILL.md here names its scripts
+#     under $HERMES_HOME/skills/cfo-shared/..., so the bundles only resolve as
+#     siblings directly under that directory.
 #
 # Read-only: the agent runs these, it does not edit them. The ledger it DOES
-# write lives in the home bind at /opt/data, which is the whole point of the
-# repo carrying no data.
+# write lives in the home bind, which is the whole point of the repo carrying
+# no data.
 #
 # The last line is different in kind: this repo's SOUL.md as a single-FILE :ro
-# bind over the gateway's own /opt/data/SOUL.md (HERMES_HOME is /opt/data). It
-# carries the no-arithmetic rule, and pinning it read-only is what keeps a turn
-# from editing that rule away.
+# bind over the gateway's own $HERMES_HOME/SOUL.md. It carries the
+# no-arithmetic rule, and pinning it read-only is what keeps a turn from
+# editing that rule away.
 services:
   hermes:
     volumes:
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-shared:/opt/data/skills/cfo-shared:ro
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-log:/opt/data/skills/cfo-log:ro
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-ask:/opt/data/skills/cfo-ask:ro
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-simulate:/opt/data/skills/cfo-simulate:ro
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-brief:/opt/data/skills/cfo-brief:ro
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-setup:/opt/data/skills/cfo-setup:ro
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-import:/opt/data/skills/cfo-import:ro
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-panel:/opt/data/skills/cfo-panel:ro
-      - ${AGENT_DIR:?set by agent-mgr from the registry}/runtime/SOUL.md:/opt/data/SOUL.md:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-shared:${AGENT_HOME_TARGET:-/opt/data}/skills/cfo-shared:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-log:${AGENT_HOME_TARGET:-/opt/data}/skills/cfo-log:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-ask:${AGENT_HOME_TARGET:-/opt/data}/skills/cfo-ask:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-simulate:${AGENT_HOME_TARGET:-/opt/data}/skills/cfo-simulate:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-brief:${AGENT_HOME_TARGET:-/opt/data}/skills/cfo-brief:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-setup:${AGENT_HOME_TARGET:-/opt/data}/skills/cfo-setup:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-import:${AGENT_HOME_TARGET:-/opt/data}/skills/cfo-import:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/cfo-panel:${AGENT_HOME_TARGET:-/opt/data}/skills/cfo-panel:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/runtime/SOUL.md:${AGENT_HOME_TARGET:-/opt/data}/SOUL.md:ro

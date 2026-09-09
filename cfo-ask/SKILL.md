@@ -16,7 +16,7 @@ it — you say what you can source.
 ## Commands
 
 ```sh
-S=/opt/data/skills/cfo-shared/scripts
+S=$HERMES_HOME/skills/cfo-shared/scripts
 python3 $S/money.py summary                 # this month: totals + by category
 python3 $S/money.py summary --month 2026-07 # a specific month
 python3 $S/money.py day                     # yesterday: total + categories

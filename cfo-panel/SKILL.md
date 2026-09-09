@@ -16,7 +16,7 @@ ask and Latch is available.
 
 ## Where it is
 
-    /opt/data/cfo/panel/index.html
+    $HERMES_HOME/cfo/panel/index.html
 
 That path is inside the instance's home, which is a folder **on the owner's
 own Mac** — `~/.hermes-<name>/cfo/panel/index.html`. It opens by double
@@ -26,7 +26,7 @@ nothing about the page reaches anyone else.
 To give them the path, read it rather than typing it from memory:
 
 ```sh
-python3 /opt/data/skills/cfo-shared/scripts/panel.py --json | head -5
+python3 $HERMES_HOME/skills/cfo-shared/scripts/panel.py --json | head -5
 ```
 
 ## It refreshes itself
@@ -43,7 +43,7 @@ So if the owner says it looks stale, do not assume it is broken. Ask what
 figure looks wrong, and check it against the ledger:
 
 ```sh
-S=/opt/data/skills/cfo-shared/scripts
+S=$HERMES_HOME/skills/cfo-shared/scripts
 python3 $S/panel.py --json      # what the page is showing
 python3 $S/money.py status      # what the ledger says
 ```
@@ -57,7 +57,7 @@ Redraw it by hand with no arguments — never with `--path`, which writes it
 somewhere the owner is not looking:
 
 ```sh
-python3 /opt/data/skills/cfo-shared/scripts/panel.py
+python3 $HERMES_HOME/skills/cfo-shared/scripts/panel.py
 ```
 
 ## Opening it on their Mac, when Latch is configured
@@ -89,7 +89,7 @@ absent that setting it follows the currency. If they want it in the other
 language, set it and redraw:
 
 ```sh
-S=/opt/data/skills/cfo-shared/scripts
+S=$HERMES_HOME/skills/cfo-shared/scripts
 python3 $S/money.py config language en && python3 $S/panel.py
 ```
 

@@ -29,7 +29,7 @@ Never state an hour you did not read from `status`.
 ## The morning brief — where the month is heading
 
 ```sh
-S=/opt/data/skills/cfo-shared/scripts
+S=$HERMES_HOME/skills/cfo-shared/scripts
 python3 $S/money.py day            # YESTERDAY -- the first sentence
 python3 $S/money.py project        # pace, projected close, fixed lines
 python3 $S/money.py summary        # month to date, by category
@@ -82,7 +82,7 @@ last thing the owner can still act on today: what they spent and did not log,
 while they still remember it.
 
 ```sh
-S=/opt/data/skills/cfo-shared/scripts
+S=$HERMES_HOME/skills/cfo-shared/scripts
 python3 $S/money.py day --today    # TODAY so far -- partial: true
 python3 $S/money.py project
 python3 $S/money.py upcoming --days 1   # due tomorrow: days_away == 1

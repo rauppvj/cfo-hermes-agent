@@ -39,8 +39,9 @@ cfo   Anotado: R$ 40,00 em alimentação. Você está em R$ 512,00 esse mês.
 > [!IMPORTANT]
 > **This repo is code only.** Nothing under this tree may carry a credential,
 > a chat id, or anybody's transactions. The ledger is a SQLite file in the
-> instance's own home on the host (`~/.hermes-<name>`, mounted at
-> `/opt/data`), written by the owner's instance and by nothing else. There is
+> instance's own home on the host (`~/.hermes-<name>`, mounted into the
+> container at `$HERMES_HOME`), written by the owner's instance and by nothing
+> else. There is
 > no server, no account, and no sign-up: your spending is not sent anywhere
 > to be stored. The language model still sees what you text it, the way any
 > agent does — that is the honest boundary, and it is worth knowing which
@@ -166,8 +167,8 @@ no device flow. Turn it off whenever you like — the agent works exactly the
 same:
 
 ```sh
-docker exec hermes-cfo python3 /opt/data/skills/cfo-shared/scripts/money.py \
-    config usage_reporting off
+docker exec hermes-cfo sh -c 'python3 "$HERMES_HOME"/skills/cfo-shared/scripts/money.py \
+    config usage_reporting off'
 ```
 
 Reporting starts at the **first run**: the client records a baseline and sends
@@ -189,26 +190,37 @@ place a `deliver: local` job leaves a trace you can read.
   one registration and nothing else; the gateway loads it from the home's
   `.env` at boot, so **a scheduled run inherits it and a `docker exec` session
   does not** — which is why registering by hand means passing it in.
-- **`HOME=/opt/data`** — where the client reads that key and keeps its
-  collection baseline. The container's own `HOME` is `/root`, in the image
-  layer that every `agent-mgr deploy` recreates.
-- **`HERMES_HOME=/opt/data`** — where `state.db` is. A wrong path is not an
-  error; it reads as **zero tokens**, which on a public index looks like an
-  agent nobody uses rather than one nobody configured.
+- **`HOME=$HERMES_HOME`** — where the client keeps its collection baseline,
+  and where a pre-2026-09-04 install's key still sits. The container's own
+  `HOME` is `/root`, in the image layer that every deploy recreates.
+- **`HERMES_HOME`** — where `state.db` and this install's identity file are.
+  **Inherited from the container, never written down here:** the boot contract
+  moved it from `/opt/data` to `/var/lib/hermes` between two bases, and a
+  literal is how one path outlives the other. A wrong path is not an error; it
+  reads as **zero tokens**, which on a public index looks like an agent nobody
+  uses rather than one nobody configured.
 
 Publishing the agent itself is a one-time act by whoever owns the id, and needs
 no account of any kind — the container's Plow token is the proof, and the same
 call mints the key every later report uses:
 
 ```sh
-docker exec -e PLOW_AGENT_TOKEN="$PLOW_AGENT_TOKEN" -e HOME=/opt/data hermes-cfo \
-  python3 /opt/data/scripts/agent_index_client.py --agent cfo --register \
+docker exec -e PLOW_AGENT_TOKEN="$PLOW_AGENT_TOKEN" hermes-cfo sh -c \
+  'HOME="$HERMES_HOME" python3 "$HERMES_HOME"/scripts/agent_index_client.py \
+  --agent cfo --register \
   --name "cfo" \
   --blurb "A financial manager you text. Log what you spend in plain language, ask where the month is heading — the ledger stays a file on your own Mac." \
   --repo https://github.com/rauppvj/cfo-hermes-agent \
   --runtime "Hermes / Plow" \
-  --image https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/chat-and-panel.png
+  --install-url https://github.com/rauppvj/cfo-hermes-agent/blob/main/docs/INSTALL.md \
+  --image https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/chat-and-panel.png'
 ```
+
+**`--install-url` is not optional in practice.** A community agent has no cloud
+deploy path, so the index turns the install button on its page into that link —
+and with none set, the page shows its owner a note asking for one where every
+visitor expects the way in. An agent ranked on installs with nothing to click
+is the whole ranking, lost to a missing flag.
 
 **Your name on the page does not come from here.** There is no `--builder-name`
 any more: the index resolves the builder from the **Plow profile** behind that
@@ -267,6 +279,8 @@ Nothing about the import is arithmetic, which is why the model is allowed near
 it at all. Every total it reports still comes from `money.py`.
 
 ## Install it
+
+**Step by step, with what each stop asks you for: [`docs/INSTALL.md`](docs/INSTALL.md).**
 
 Prerequisites: `docker` running, `python3` 3.11+, `git`, and an authenticated
 `gh` (`gh auth login`).

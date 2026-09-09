@@ -49,6 +49,7 @@ one definition in this repo.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -59,7 +60,11 @@ from pathlib import Path
 # single-file bind at /opt/data/scripts/brief_gate.py, where nothing else from
 # this repo is. Trying the sibling first keeps the tests and a local run
 # honest; the skills mount is the deployed answer.
+# $HERMES_HOME, not a literal -- see panel.py for the same three-way lookup and
+# the contract change that made it necessary.
 for _candidate in (Path(__file__).resolve().parent,
+                   Path(os.environ.get("HERMES_HOME", "/opt/data"),
+                        "skills/cfo-shared/scripts"),
                    Path("/opt/data/skills/cfo-shared/scripts")):
     if (_candidate / "money.py").is_file():
         sys.path.insert(0, str(_candidate))

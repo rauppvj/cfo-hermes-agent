@@ -18,7 +18,7 @@ comes from a field in the JSON.
 ## The call
 
 ```sh
-python3 /opt/data/skills/cfo-shared/scripts/money.py add '<amount>' \
+python3 $HERMES_HOME/skills/cfo-shared/scripts/money.py add '<amount>' \
   --kind expense|income --category <category> --note '<what they said>'
 ```
 

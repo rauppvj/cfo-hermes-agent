@@ -10,7 +10,7 @@ manager answers in one sentence. The whole skill is: get the arithmetic from
 the engine, then say the thing the number means.
 
 ```sh
-python3 /opt/data/skills/cfo-shared/scripts/money.py simulate "<amount>" \
+python3 $HERMES_HOME/skills/cfo-shared/scripts/money.py simulate "<amount>" \
   --installments <n>
 ```
 
