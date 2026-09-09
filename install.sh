@@ -240,6 +240,13 @@ TXT
 fi
 
 # --------------------------------------------------------------------------
+# 6. Is it this agent? Every failure this install can have is silent
+# --------------------------------------------------------------------------
+step "Checking the install"
+docker exec "$CONTAINER" sh -c \
+    'python3 "$HERMES_HOME"/skills/cfo-shared/scripts/doctor.py' || true
+
+# --------------------------------------------------------------------------
 # Done
 # --------------------------------------------------------------------------
 cat <<TXT
@@ -265,4 +272,8 @@ on its own.
 
     agent-mgr logs $NAME          follow it
     agent-mgr restart $NAME       after changing anything in this checkout
+
+Any time something looks off, the check above is one command:
+
+    docker exec $CONTAINER sh -c 'python3 "\$HERMES_HOME"/skills/cfo-shared/scripts/doctor.py'
 TXT

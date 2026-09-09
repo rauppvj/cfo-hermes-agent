@@ -39,7 +39,8 @@ cd cfo-hermes-agent
 ```
 
 That is the command. The script installs the deployer, registers this checkout,
-builds and starts the container, and registers the scheduled jobs.
+builds and starts the container, registers the scheduled jobs, and ends by
+checking its own work.
 
 **It stops twice**, both times for something only you can do.
 
@@ -66,6 +67,27 @@ Every step checks whether it is already done and says so instead of doing it
 again. If something fails halfway — a network blip, a Docker restart — run
 `./install.sh` again and it resumes.
 
+### The last thing it prints
+
+```
+==> Checking the install
+  ✓ home                 HERMES_HOME=/var/lib/hermes
+  ✓ skills               8/8 under /var/lib/hermes/skills
+  ✓ soul                 the cfo SOUL.md is in place
+  ✓ ledger               /var/lib/hermes/cfo/ledger.db · schema 4 · 0 rows
+  ✓ timezone             ...
+  ...
+  ✓ index registration   registered · install 3f2a...
+  ✓ index report         200 {'ok': True, ...}
+
+  all good -- this is cfo, and it is reporting
+```
+
+That is `doctor.py`, and it exists because every failure this install can
+have is silent: skills mounted where the gateway does not read, a usage
+report failing into a log nobody opens, a stale schedule. A `✗` line says what
+is wrong and what fixes it.
+
 ---
 
 ## First conversation
@@ -84,6 +106,13 @@ Tell it where you live. That one answer sets the timezone, which decides which
 you   spent 40 on lunch
 cfo   Recorded: $40.00 on food. You're at $512.00 this month.
 
+you   I have 1,312.40 in the account
+cfo   Noted. $1,312.40 in the account, $60.00 open on the card.
+
+you   how much do I have?
+cfo   $1,272.40 in the account — $852.40 after Friday's rent.
+      $60.00 on the card, unpaid.
+
 you   can I afford a 2,000 monitor?
 cfo   It fits, but the month closes $300.00 in the red at this pace.
 ```
@@ -93,11 +122,15 @@ as an attachment — CSV, or a PDF where your bank offers no export — and it
 imports. Credit-card invoices too; they are a different document and are parsed
 as one.
 
+**Stop typing purchases at all.** Three minutes in your iPhone's Shortcuts app
+and every card tap reaches the agent by itself: [`AUTOPILOT.md`](AUTOPILOT.md).
+
 ### The two briefs
 
-At 08:00 your local time it tells you where the month is heading. At 22:00 it
-tells you about the day, and only when the day gave it something to say. Move
-the hour by asking — *"send me the brief at 7"* — or turn it off the same way.
+At 08:00 your local time it tells you what yesterday cost, what is in the
+account and where the month is heading. At 22:00 it tells you about the day,
+and only when the day gave it something to say. Move the hour by asking —
+*"send me the brief at 7"* — or turn it off the same way.
 
 ### The panel
 
@@ -127,6 +160,14 @@ agent-mgr set-latch cfo && agent-mgr deploy cfo
 
 ## Checking it works
 
+One command, any time:
+
+```sh
+docker exec hermes-cfo sh -c 'python3 "$HERMES_HOME"/skills/cfo-shared/scripts/doctor.py'
+```
+
+By hand, if you would rather see the pieces:
+
 ```sh
 # the container is up
 docker ps --filter name=hermes-cfo
@@ -148,7 +189,8 @@ lands as `200 {'ok': True, ...}`; anything else is in there with the reason.
 **"docker is installed but not running"** — start Docker Desktop and re-run.
 
 **The agent answers but knows nothing about money.** Its skills did not land
-where the gateway reads. Ask the container itself:
+where the gateway reads. The doctor's `skills` line says so; or ask the
+container itself:
 
 ```sh
 docker exec hermes-cfo sh -c 'ls "$HERMES_HOME"/skills | grep cfo'
@@ -160,11 +202,16 @@ and answers and simply is not this agent. `git pull` in this repo and in
 `~/services/agent-mgr`, then `agent-mgr deploy cfo`.
 
 **No brief arrived.** The hour is the *owner's* hour, read from the ledger, so
-check what it thinks it is:
+check what it thinks it is — the doctor's `brief hours` and `brief last
+opened` lines, or:
 
 ```sh
 docker exec hermes-cfo sh -c 'python3 "$HERMES_HOME"/skills/cfo-shared/scripts/money.py config timezone'
 ```
+
+**The brief came in the wrong language.** It follows `config language`; the
+agent stores it on first contact, and you can ask for the other one in the
+chat.
 
 **Nothing on the Agent Index.** Read `~/.hermes-cfo/logs/agent-index.log`. It is
 the only place an hourly `deliver: local` job leaves a trace.
@@ -184,6 +231,9 @@ agent-mgr down cfo
 # remove it, keeping the ledger (it is ~/.hermes-cfo, delete that yourself)
 agent-mgr unregister cfo
 ```
+
+Your data leaves with you: *"send me my spending"* in the chat delivers a CSV
+of the ledger into the conversation, any time.
 
 ---
 
