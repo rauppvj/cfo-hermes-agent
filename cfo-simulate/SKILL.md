@@ -1,6 +1,6 @@
 ---
 name: cfo-simulate
-description: Answer whether the owner can afford a specific purchase, and what it costs them beyond the price — the effect on this month's close, and how instalments change the answer. Use for "can I afford X", "posso comprar um monitor de 2 mil", "should I buy this", "what if I spend 500 on Y", "is it better in 3x or upfront". Do not use for general questions about past spending (cfo-ask) or to record a purchase already made (cfo-log).
+description: Answer whether the owner can afford a specific purchase, and what it costs them beyond the price — the effect on this month's close, what would be left in the account, and how instalments change the answer. Use for "can I afford X", "posso comprar um monitor de 2 mil", "should I buy this", "what if I spend 500 on Y", "is it better in 3x or upfront". Do not use for general questions about past spending (cfo-ask) or to record a purchase already made (cfo-log).
 ---
 
 # Can I afford this?
@@ -17,7 +17,8 @@ python3 $HERMES_HOME/skills/cfo-shared/scripts/money.py simulate "<amount>" \
 Returns the month's projection with and without the purchase:
 `projected_net_before`, `projected_net_after`, `fits_this_month`, `swing`,
 `per_installment`, `first_installment` — each with a `_fmt` twin — plus
-`basis`.
+`basis`, and, when the owner has given a balance reading,
+`balance_now_cents` and `balance_after_first_cents`.
 
 ## Read `basis` before you read the verdict
 
@@ -54,6 +55,21 @@ verdict against a thirty-times-one-day pace is not.
 left over, you do not divide the price yourself, and you do not judge
 affordability by feel. `fits_this_month` is the verdict; the rest is how you
 explain it.
+
+## The month, and the account
+
+"Fits the month" and "I have it in the account today" are different
+questions, and a purchase on the 3rd can pass the first and fail the second.
+When `balance_now_cents` is not null the owner has given a reading, and the
+engine says what the account would hold after the first instalment:
+
+> Cabe no mês. Na conta você tem R$ 1.312,40 e ficaria com R$ 912,40 depois
+> da primeira parcela de R$ 400,00 — e o condomínio de R$ 420,00 vence sexta.
+
+Quote `balance_after_first_cents` as it comes; never subtract it yourself.
+When it is null, say nothing about the account — the projection is still a
+real answer — and do not ask for a balance in the middle of a purchase
+question unless the purchase is large enough that it is the question.
 
 ## Run it more than once
 

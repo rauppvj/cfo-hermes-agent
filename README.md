@@ -1,9 +1,10 @@
 # cfo
 
 **A financial manager you text.** Log what you spend in the words you'd use
-with a person, ask where the month is heading, and find out what a purchase
-actually costs you before you make it — over iMessage, with the ledger living
-as a file on your own machine.
+with a person — or let your phone do it — ask what is in the account and
+where the month is heading, and find out what a purchase actually costs you
+before you make it. Over iMessage, with the ledger living as a file on your
+own machine.
 
 A [Hermes](https://howto.plow.co/hermes) agent, texted through
 [Plow Chat](https://plow.co) and installed with one command. Optionally drives
@@ -17,13 +18,23 @@ container lifecycle, so it is what `install.sh` uses and what it should use.
 you   spent 40 on lunch
 cfo   Recorded: $40.00 on food. You're at $512.00 this month.
 
+💳    $14.90 · Corner Bakery · Chase          ← your phone sent this, not you
+cfo   ✓ $14.90 · Corner Bakery · food · $526.90 this month.
+
+you   how much do I have?
+cfo   $1,312.40 in the account — $892.40 after Friday's rent.
+      $1,519.81 on the card, unpaid.
+
+you   Saturday I paid the car, 118.60, and Sunday the market, 64.35
+cfo   Recorded on Saturday: $118.60, transport. On Sunday: $64.35, groceries.
+
 you   can I afford a 2,000 monitor?
 cfo   It fits, but the month closes $300.00 in the red at this pace.
       Split in 3 it fits comfortably — $666.68 now and two of $666.66.
 
-08:00 Morning. Yesterday $87.00. At this pace September closes at
-      $3,240.00, $400.00 over plan. Food has already passed the whole
-      of August.
+08:00 Morning. Yesterday $87.00. $1,312.40 in the account. At this pace
+      September closes at $3,240.00, $400.00 over plan. Food is at 85% of
+      its budget.
 
 22:00 $132.40 so far today. The condo fee is due tomorrow, $420.00.
 ```
@@ -76,7 +87,52 @@ income is known, how much of the month being projected has actually elapsed —
 and `basis.usable` is false when the answer would be real arithmetic on
 nothing. A month one day old is not a pace: one trip to the shop times thirty
 is a formatted, sourced, meaningless number, and that is the only kind a
-person cannot catch.
+person cannot catch. `balance` makes the same refusal: with no reading from
+the owner it says what to ask for, because income minus expenses since the
+ledger began is not what is in anyone's account.
+
+## Two questions people ask as one
+
+*"How much did I spend?"* and *"how much do I have?"* are different questions,
+and most tools answer the second with the first. The engine keeps them apart:
+
+- **Spending** is every purchase, by category, whether it went on a card or
+  not. That is `summary`, `day`, `week`, `project`.
+- **The account** is the last balance you read off your bank — *"I have
+  1,312.40"* is a reading, not a transaction — kept current from that instant
+  with what actually left: debit spending and card payments. A card purchase
+  is spending today and leaves the account only when the invoice is paid;
+  paying the invoice leaves the account and is not spending. That is
+  `balance`, with `card_open` for what the next invoice already holds.
+
+The first real evening of use produced both mistakes at once: card purchases
+subtracted from a "balance" that was really a net, and a paid invoice counted
+as spending on top of the purchases it settled. Both are fields now.
+
+## It fills itself in
+
+The chat is the slow part of a money agent, so most of the month should
+arrive without typing:
+
+- **Every card tap, from the phone.** An iPhone Shortcuts automation on the
+  Wallet transaction trigger texts the agent `💳 amount · merchant · card` the
+  moment a card is used; the agent logs it on the card, names the category,
+  and answers in one line. Three minutes to set up, once:
+  [`docs/AUTOPILOT.md`](docs/AUTOPILOT.md).
+- **A photo of the receipt.** Send the image; the agent reads the total, the
+  merchant and the date, and confirms the one line it is about to write.
+- **The statement, at month end.** Send the bank's CSV or PDF as an
+  attachment — or the card invoice — and ninety days import at once,
+  deduplicated against what was already logged. See below.
+- **Catching up in one message.** *"Saturday I paid the car, Sunday the
+  market, Monday 1,240"* — each row lands on the day you named, not on the
+  day you typed it. That is `add --on saturday`, and it exists because one
+  evening of catching up once landed four days on one date and the next
+  morning's brief opened with a "yesterday" four times too big.
+
+And two things arrive without being asked for: the morning brief, and the
+evening one when the day gave it something to say — including, once, a
+request for a fresh balance reading when the last one is getting old.
 
 ## Try it in one minute
 
@@ -93,7 +149,9 @@ python3 cfo-shared/scripts/money.py config currency USD
 python3 cfo-shared/scripts/seed_demo.py          # 3 months of sample data
 
 python3 cfo-shared/scripts/money.py day             # yesterday, one number
+python3 cfo-shared/scripts/money.py balance         # in the account, on the card
 python3 cfo-shared/scripts/money.py summary
+python3 cfo-shared/scripts/money.py budget          # each ceiling, who is near it
 python3 cfo-shared/scripts/money.py project
 python3 cfo-shared/scripts/money.py simulate "1,200.00" --installments 3
 
@@ -104,8 +162,11 @@ The sample data is **deterministic per month**: three completed months seeded
 from a fixed RNG, so those numbers are identical on every machine and in the
 demo video, plus the current month filled in up to today — because a sample
 whose current month is empty cannot answer the first question anyone asks it.
-Seeded rows are marked `source: demo`, and `seed_demo.py --reset` removes them
-while leaving anything you logged yourself untouched.
+It puts shopping, leisure and subscriptions on a card and pays the invoice on
+the 10th, sets three budgets and an opening balance, so every surface has
+something to show. Seeded rows are marked `source: demo`, and
+`seed_demo.py --reset` removes them while leaving anything you logged yourself
+untouched.
 
 ## The panel: the second surface
 
@@ -116,10 +177,11 @@ before you ask — so the same ledger also renders as one page:
 
 Open it by double click, put it full-screen on a spare monitor or an old
 iPad, and it shows the month's spend, where it closes at the current pace,
-today and yesterday, the categories, and the bills due in the next seven
-days. It reloads itself every minute; **every write to the ledger redraws
-it**, so a spend texted from the sofa is on the kitchen screen before the
-reply arrives.
+today and yesterday, what is in the account and what is on the card, the
+categories — each against its budget when it has one — and the bills due in
+the next seven days. It reloads itself every minute; **every write to the
+ledger redraws it**, so a spend texted from the sofa is on the kitchen screen
+before the reply arrives.
 
 **No model writes any figure on that page.** `panel.py` renders it from the
 same functions `money.py` prints from — which is also why it shows no
@@ -145,8 +207,8 @@ so the scheduler runs the script and never wakes the model — no tokens, no
 message, ten minutes apart. That tick is not redundant with the write hook:
 at midnight "today" becomes a different day on a page nobody has touched.
 
-The language follows `money.py config language pt|en`, and without that
-setting it follows the currency.
+The language follows `money.py config language pt|en`, which the agent stores
+from your first message; without that setting it follows the currency.
 </details>
 
 ## Usage, and the Agent Index
@@ -257,7 +319,8 @@ language. The parser is built around what real files do rather than what a
 format says: the year printed once in a section header and never on the rows,
 two date columns where the second leads the description, non-breaking spaces
 inside `R$ 1.800,00`, and every row opening with a transaction type that
-buries the merchant.
+buries the merchant. The line where the card was paid is recognised and
+recorded as a transfer, not as spending.
 
 **Credit-card invoices** — a fatura is a different document and every
 assumption a statement parser makes about it is wrong. Rows date themselves
@@ -267,7 +330,9 @@ the line — correct on a statement, where the last number is the balance —
 imports the rate. And the invoice carries its own settlement of last month,
 unsigned, in the middle of the purchases: counted as spending it nearly
 doubles the month, and it is already on the bank statement as the payment
-leaving the account. It is excluded and named, not silently dropped.
+leaving the account. It is excluded and named, not silently dropped. Every
+purchase on it lands on the card, so the open invoice is right after an
+import too.
 
 Then the part a keyword rule cannot do. Rules catch the chains and miss
 everything local, which in a real statement is most of it, so `uncategorized`
@@ -297,7 +362,16 @@ It stops twice, both times for something only you can do: texting an
 activation code from the phone that will own the agent, and entering a device
 code for the model provider. Everything else — installing `agent-mgr`,
 registering, deploying, starting the container, registering the brief — it
-does.
+does, and it ends by checking its own work:
+
+```sh
+docker exec hermes-cfo sh -c 'python3 "$HERMES_HOME"/skills/cfo-shared/scripts/doctor.py'
+```
+
+[`doctor.py`](cfo-shared/scripts/doctor.py) exists because every failure this
+install can have is silent: skills mounted where the gateway does not read, a
+usage report failing into a log nobody opens, a stale schedule, a SOUL.md that
+is the image's and not this agent's. One line per check, and what fixes it.
 
 **Re-run it whenever.** Every step checks whether it is already done and says
 so instead of repeating it. `activate` is guarded hardest: it is a one-time
@@ -344,6 +418,10 @@ in the chat, and that is the only place the zone lives:
 > cost. A cron expression could not do this. It fires in the container's zone,
 > which agent-mgr defaults to `America/Los_Angeles` for the whole fleet, so a
 > `0 8 * * *` brief reaches Tokyo at midnight and nothing anywhere reports it.
+> When the gate opens it also names the language the brief is written in —
+> the one the owner writes in, stored on first contact — because the brief
+> has no message above it to mirror, and one morning that was enough for a
+> Portuguese brief to reach someone who had only ever written English.
 >
 > Change the hour by asking: *"send me the brief at 7"* → `money.py config
 > brief_hour 7`, or `off` to stop it. The setter refuses anything that is not
@@ -357,12 +435,12 @@ agent permanently** — send it from the phone that should own it.
 
 | skill | what it does |
 |---|---|
-| [`cfo-log`](cfo-log/SKILL.md) | records a spend or income from plain language |
-| [`cfo-ask`](cfo-ask/SKILL.md) | answers questions about the month, a category, a comparison |
-| [`cfo-simulate`](cfo-simulate/SKILL.md) | what a purchase does to the month, upfront or split |
+| [`cfo-log`](cfo-log/SKILL.md) | records a spend, an income, a card tap, a receipt photo, a balance reading or a paid invoice, from plain language — on the day it happened |
+| [`cfo-ask`](cfo-ask/SKILL.md) | answers what is in the account, what is on the card, what the month, the week, a day or a budget looks like; exports the ledger |
+| [`cfo-simulate`](cfo-simulate/SKILL.md) | what a purchase does to the month and to the account, upfront or split |
 | [`cfo-brief`](cfo-brief/SKILL.md) | the morning and evening briefs — the only times it speaks first |
-| [`cfo-setup`](cfo-setup/SKILL.md) | first run: timezone, currency, fixed lines, sample data |
-| [`cfo-import`](cfo-import/SKILL.md) | reads a bank statement or card invoice off the owner's Mac |
+| [`cfo-setup`](cfo-setup/SKILL.md) | first run: language, timezone, currency, income, fixed lines, balance; budgets; cards; the autopilot; sample data |
+| [`cfo-import`](cfo-import/SKILL.md) | reads a bank statement or card invoice sent to the chat or picked off the Mac |
 | [`cfo-panel`](cfo-panel/SKILL.md) | the wall panel — where it is, how to refresh it, how to open it |
 
 ## Tests
@@ -371,14 +449,16 @@ agent permanently** — send it from the phone that should own it.
 python3 -m pytest tests/ -q
 ```
 
-127 of them, and the ones that earn their place are the boundary tests: an
-amount read in the wrong locale (`R$ 1.234,56` vs `1,234.56`), a day resolved
-in the wrong zone, a merchant name matched inside a longer word (`Raia` in
-`PRAIA GRANDE`), four identical bus fares on one afternoon collapsed into one
-by a deduplicator, a brief hour that opens at 08:00 in Tokyo rather than in
-the container's Los Angeles. Every one of those fails *silently* — it produces
-a number, or a message at the wrong hour, and nobody notices until the month
-closes.
+Nearly two hundred, and the ones that earn their place are the boundary
+tests: an amount read in the wrong locale (`R$ 1.234,56` vs `1,234.56`), a
+day resolved in the wrong zone, a merchant name matched inside a longer word
+(`Raia` in `PRAIA GRANDE`), four identical bus fares on one afternoon
+collapsed into one by a deduplicator, a brief hour that opens at 08:00 in
+Tokyo rather than in the container's Los Angeles, a Saturday that was typed
+on a Tuesday, a paid invoice that must not be spending, a balance reading
+and a purchase logged in the same second. Every one of those fails
+*silently* — it produces a number, or a message at the wrong hour, and nobody
+notices until the month closes.
 
 A test here is only trusted once it has been run against the code from
 **before** the fix and seen to fail. Two early drafts of one passed against
@@ -391,7 +471,8 @@ figures rather than shapes.
 correctly regardless of the configured currency; the setting only decides how
 figures are printed back. `BRL`, `USD`, `EUR` and `GBP` are formatted
 natively. Nothing about this agent is specific to one country — there is no
-bank integration to be missing.
+bank integration to be missing, and the one automation it has runs on the
+phone, not on a bank.
 
 ## License
 

@@ -74,9 +74,11 @@ saves them the walk to Finder.
 
 ## What it shows, so you can answer questions about it
 
-The month's spend as the hero figure, where it closes at the current pace,
-today and yesterday, the top categories, and the bills falling due in the
-next seven days.
+Top to bottom: the month's spend as the hero figure and where it closes at
+the current pace; today and yesterday; **what is in the account** and **what
+is on the card, unpaid**; the top categories, each drawn against its own
+budget when one is set (the bar turns red past the ceiling); and the bills
+falling due in the next seven days.
 
 **When the month is too young, the panel shows no projection** — the same
 rule the brief follows, for the same reason: a pace divided by two days is
@@ -84,7 +86,12 @@ one purchase multiplied by thirty. If the owner asks why the projection is
 missing, that is the answer, and `money.py project` names what is missing in
 `basis.reasons`.
 
-The page is in the owner's language, from `money.py config language pt|en`;
+**When there is no balance reading, the account card says so** instead of
+showing a number — "tell the agent what is in the account". That is a
+`balance set` away (cfo-log). The card figure comes from `money.py balance`;
+if the owner disputes it, that command's fields are where to look.
+
+The page is in the owner's language, from `money.py config language`;
 absent that setting it follows the currency. If they want it in the other
 language, set it and redraw:
 
