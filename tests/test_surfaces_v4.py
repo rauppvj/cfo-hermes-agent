@@ -120,14 +120,14 @@ def _fake_home(tmp_path, mod, con) -> Path:
         (home / "skills" / skill / "SKILL.md").write_text("---\nname: x\n---\n")
     shutil.copytree(SCRIPTS, home / "skills" / "cfo-shared" / "scripts")
     (home / "scripts").mkdir()
-    for name in ("brief_gate.py", "panel.py", "usage_report.sh"):
+    for name in ("brief_gate.py", "notify_gate.py", "panel.py", "usage_report.sh"):
         shutil.copy(SCRIPTS / name, home / "scripts" / name)
     (home / "scripts" / "agent_index_client.py").write_text(
         "import sys\nprint('  registered: install abc')\nsys.exit(0)\n")
     (home / "cron").mkdir()
     (home / "cron" / "jobs.json").write_text(json.dumps({"jobs": [
         {"name": n, "enabled": True, "last_run": "2026-09-09T11:00:00-03:00"}
-        for n in ("cfo-brief", "cfo-panel", "cfo-usage")]}))
+        for n in ("cfo-brief", "cfo-panel", "cfo-usage", "cfo-notify")]}))
     (home / "logs").mkdir()
     (home / "logs" / "agent-index.log").write_text(
         "2026-09-09T14:17:52Z agent=cfo days=4\n"
