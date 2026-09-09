@@ -96,7 +96,7 @@ def handle(con, item: dict) -> str:
     """One notification -> one line for the agent, with the ledger updated."""
     text = " ".join(str(item.get(k) or "") for k in ("title", "subtitle", "body")).strip()
     app = item.get("app") or ""
-    p = bankalert.parse(text)
+    p = bankalert.parse(text, app=app, body=str(item.get("body") or ""))
     cur = money.currency_of(con)
     if not p["ok"]:
         if p["event"] in ("declined", "invoice_closed"):

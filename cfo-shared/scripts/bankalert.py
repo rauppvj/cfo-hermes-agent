@@ -59,7 +59,23 @@ NOISE_TAIL = re.compile(r"\s*(?:\*+\d{4}|final \d{4})\s*$", re.I)
 DATE_LIKE = re.compile(r"^\d{1,2}/\d{1,2}(?:/\d{2,4})?(?:\s+\d{1,2}:\d{2})?$")
 
 
-def _merchant(raw: str, amount_match) -> str | None:
+STOP_WORD = re.compile(STOP + r"$", re.I)
+HAS_DATE = re.compile(r"\d{1,2}/\d{1,2}")
+
+
+def _clean(candidate: str) -> str | None:
+    name = NOISE_TAIL.sub("", candidate.strip(" -–—*")).strip()
+    if not name or AMOUNT.search(name) or HAS_DATE.search(name):
+        return None
+    if STOP_WORD.match(name.split()[0]):
+        # "dia 09/09/2026 às 15:17" sits between the amount and the "em
+        # LOJA" in a C6 alert; a name never starts with one of these words.
+        return None
+    return name
+
+
+def _merchant(raw: str, amount_match, body: str | None = None,
+              wallet: bool = False) -> str | None:
     candidates = []
     if amount_match:
         hit = AFTER_AMOUNT.match(raw[amount_match.end():])
@@ -69,10 +85,23 @@ def _merchant(raw: str, amount_match) -> str | None:
     if hit:
         candidates.append(hit.group("m"))
     for c in candidates:
-        name = NOISE_TAIL.sub("", c.strip(" -–—*")).strip()
-        if name and not AMOUNT.fullmatch(name) and not DATE_LIKE.match(name):
+        name = _clean(c)
+        if name:
             return name
+    # Apple Wallet's own notification for a tap is "<Merchant>. <City>, <ST>"
+    # then the amount: the merchant is the first clause of the body, and
+    # nothing else in it says "compra". Only when nothing better was found,
+    # and only for a short clause -- a bank's sentence is never five words.
+    if wallet and body:
+        first = re.split(r"[.\n]", body.strip(), maxsplit=1)[0].strip()
+        if first and len(first.split()) <= 6 and not AMOUNT.search(first):
+            return first
     return None
+
+
+def is_wallet(app: str) -> bool:
+    a = (app or "").lower()
+    return "passbook" in a or "passkit" in a or "wallet" in a
 
 
 def _fold(s: str) -> str:
@@ -92,11 +121,13 @@ def parse_amount(raw: str) -> int:
     return int(round(float(s) * 100))
 
 
-def parse(text: str) -> dict:
+def parse(text: str, app: str = "", body: str | None = None) -> dict:
     """What the alert says, as fields. `ok` is False when it should not be
     logged -- no amount, a declined purchase, an invoice closing -- and
-    `event` says why."""
+    `event` says why. `app` is the notifying app's identifier when known:
+    Apple Wallet's own notification names no event, and is a purchase."""
     raw = (text or "").strip()
+    wallet = is_wallet(app)
     flat = _fold(raw)
     out = {"ok": False, "event": "unknown", "amount_cents": None,
            "merchant": None, "method": None, "kind": None, "text": raw}
@@ -112,13 +143,15 @@ def parse(text: str) -> dict:
         if re.search(pattern, flat):
             out["event"] = event
             break
+    if out["event"] == "unknown" and wallet and out["amount_cents"]:
+        out["event"] = "purchase"
 
     if METHOD_DEBIT.search(flat):
         out["method"] = "debit"
     elif METHOD_CREDIT.search(flat):
         out["method"] = "credit"
 
-    out["merchant"] = _merchant(raw, m)
+    out["merchant"] = _merchant(raw, m, body=body, wallet=wallet)
 
     if out["event"] in ("purchase", "pix_out"):
         out["kind"] = "expense"

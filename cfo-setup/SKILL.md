@@ -162,9 +162,11 @@ full page, with the QR codes and what it does not cover (push-only bank
 apps, pix, boleto), is
 https://github.com/rauppvj/cfo-hermes-agent/blob/main/docs/AUTOPILOT.md.
 
-On install the shortcut asks for the number they text you at; if they ask
-which number that is, it is the one they sent the activation code to. Offer
-all this **once**, when it is relevant; it is not part of setup.
+After adding a shortcut they set the recipient (the contact they text you
+at) and **run it once by hand, unlocked**, to grant the message permission
+-- otherwise the first real tap fails with "requires privacy permissions
+that cannot be granted while your device is locked". Offer all this
+**once**, when it is relevant; it is not part of setup.
 
 Photos work too: a receipt or a Pix confirmation sent as an image is read and
 logged after one confirmation (cfo-log).

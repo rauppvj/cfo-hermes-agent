@@ -75,6 +75,14 @@ shortcut once and set the **recipient** of *Send Message* to the contact you
 text your agent at (the same thread you sent the activation code to). That is
 the one field a shared shortcut cannot carry.
 
+**Then run it once by hand, with the phone unlocked** (tap ▶). iOS asks
+whether the shortcut may send messages and read the contact; allow both.
+This is not optional: a tap happens with the phone locked, and iOS will not
+grant a permission on a locked phone -- the first real tap fails with
+*"requires privacy permissions that cannot be granted while your device is
+locked"* until you have done this. The manual run sends an empty `💳 · ·`,
+which the agent ignores.
+
 You can also ask the agent for the links in the chat — *"how do I stop typing
 purchases?"* — and tap them from there.
 

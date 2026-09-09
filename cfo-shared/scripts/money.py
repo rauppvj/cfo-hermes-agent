@@ -595,13 +595,20 @@ def forwarded_twin(con, cents: int, source: str, minutes: int = FORWARDED_WINDOW
     """
     if source not in FORWARDED:
         return None
-    others = [s for s in FORWARDED if s != source]
+    sources = [s for s in FORWARDED if s != source]
+    if source == "push":
+        # A tap paid with a card in Wallet produces TWO notifications for one
+        # purchase -- Apple Wallet's own and the bank's -- and both reach the
+        # Mac as push. Same channel, same amount, minutes apart: one row.
+        # Taps and SMS keep their same-channel twins (two coffees).
+        sources.append("push")
+    marks = ",".join("?" * len(sources))
     since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
     return con.execute(
-        "SELECT id, day_local, note, source, method, category FROM tx"
-        " WHERE amount_cents = ? AND kind = 'expense' AND source IN (?, ?)"
-        " AND created_utc >= ? ORDER BY id DESC LIMIT 1",
-        (cents, *others, since)).fetchone()
+        f"SELECT id, day_local, note, source, method, category FROM tx"
+        f" WHERE amount_cents = ? AND kind = 'expense' AND source IN ({marks})"
+        f" AND created_utc >= ? ORDER BY id DESC LIMIT 1",
+        (cents, *sources, since)).fetchone()
 
 
 def record_forwarded(con, cents: int, kind: str, category: str, note: str,

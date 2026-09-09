@@ -169,3 +169,18 @@ def test_the_watcher_can_look_back_once(tmp_path):
 def test_an_unreadable_blob_is_an_empty_notification_not_a_crash():
     import notify_watch
     assert notify_watch.unpack(b"not a plist") == {"title": "", "subtitle": "", "body": ""}
+
+
+def test_two_pushes_for_one_tap_are_one_row_and_the_bank_names_the_method(mod, con):
+    wallet_notif = mod.record_forwarded(con, 5796, "expense", "groceries",
+                                        "Supermercado Bom Preco", "push")
+    assert wallet_notif["skipped"] is False and wallet_notif["method"] == "credit"
+    bank = mod.record_forwarded(con, 5796, "expense", "groceries",
+                                "SUPERMERCADO BOM PRECO SAO PAULO BRA", "push", method="debit")
+    assert bank["skipped"] is True and bank["duplicate_of"] == wallet_notif["id"]
+    assert bank["method_updated"] is True
+    assert mod.get_tx(con, wallet_notif["id"])["method"] == "debit"
+    # two taps of the same amount stay two taps
+    a = mod.record_forwarded(con, 500, "expense", "food", "cafe", "wallet")
+    b = mod.record_forwarded(con, 500, "expense", "food", "cafe", "wallet")
+    assert a["skipped"] is False and b["skipped"] is False

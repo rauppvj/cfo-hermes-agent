@@ -67,3 +67,23 @@ def test_an_empty_alert_never_yields_an_amount():
 def test_a_refund_is_income_back_to_the_account():
     p = bankalert.parse("Estorno de R$ 59,90 de LOJA X creditado")
     assert (p["kind"], p["method"], p["amount_cents"]) == ("income", "debit", 5990)
+
+
+# -- the shapes one Brazilian bank actually sent, with the card and shop changed
+
+def test_a_date_clause_between_the_amount_and_the_shop_is_not_the_shop():
+    p = bankalert.parse("Compra no débito aprovada Sua compra no cartão final 1234 no valor "
+                        "de R$ 57,96, dia 09/09/2026 às 15:17, em SUPERMERCADO BOM PRECO "
+                        "SAO PAULO BRA, foi aprovada.")
+    assert p["ok"] and p["amount_cents"] == 5796 and p["method"] == "debit"
+    assert p["merchant"] == "SUPERMERCADO BOM PRECO SAO PAULO BRA"
+
+
+def test_apple_wallets_own_notification_is_a_purchase_named_by_its_first_clause():
+    body = "Supermercado Bom Preco. São Paulo, SP\nR$ 57,96"
+    p = bankalert.parse("C6 Bank " + body, app="com.apple.Passbook", body=body)
+    assert p["ok"] and p["event"] == "purchase" and p["amount_cents"] == 5796
+    assert p["merchant"] == "Supermercado Bom Preco"
+    assert p["method"] is None          # Wallet does not know débito from crédito
+    # the same text from an unknown app names no event and is not logged
+    assert bankalert.parse("C6 Bank " + body, body=body)["ok"] is False
