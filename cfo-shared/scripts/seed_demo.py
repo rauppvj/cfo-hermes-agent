@@ -25,7 +25,11 @@ Two properties matter more than realism:
 
 The story in the data is deliberate: variable spending creeps up ~12% a month
 while income is flat, so the projection has something to warn about instead
-of reporting a comfortable month three times.
+of reporting a comfortable month three times. Shopping, leisure and the
+subscriptions go on the card and the card is paid on the 10th, so the balance
+and the open invoice show the difference between "spent" and "left the
+account"; food has a budget it is brushing against, so the brief and the
+panel have a ceiling to point at.
 """
 
 from __future__ import annotations
@@ -53,12 +57,24 @@ PATTERN = [
     ("subscriptions",  2, 3990,  1500),
 ]
 
+# What goes on the card. Everything else leaves the account as it is spent.
+ON_CARD = {"leisure", "shopping", "subscriptions"}
+CARD_PAY_DAY = 10
+
 FIXED = [
     ("rent",     180000, "expense", 5),
     ("internet",  14990, "expense", 10),
     ("phone",      8990, "expense", 12),
     ("salary",   700000, "income",  5),
 ]
+
+# A ceiling per category, in cents. Food sits near its line by design.
+BUDGETS = [("food", 100000), ("leisure", 40000), ("shopping", 50000)]
+
+# What the account held on the 1st of the current month. A round figure
+# anyone can recognise as invented, so the panel and the brief have a balance
+# to say without pretending the sample knows anyone's bank.
+OPENING_BALANCE = 650000
 
 NOTES = {
     "food": ["lunch", "coffee", "dinner out", "bakery", "delivery"],
@@ -99,6 +115,7 @@ def seed(con, months: int = 3) -> dict:
     con.commit()
 
     # `back` counts down to 0, which is the current, partial month.
+    card_carried = 0        # what last month put on the card, paid on the 10th
     for back in range(months, -1, -1):
         start = month_start(this_month, back)
         days = (next_month(start) - start).days
@@ -113,6 +130,14 @@ def seed(con, months: int = 3) -> dict:
         rng = random.Random(SEED + back)
         drift = 1.0 + 0.12 * (months - back)
 
+        if card_carried and CARD_PAY_DAY <= last_day:
+            when = (start + timedelta(days=CARD_PAY_DAY - 1)).replace(
+                hour=9, minute=5, tzinfo=tz)
+            m.add_tx(con, card_carried, "transfer", m.CARD_PAYMENT,
+                     note="card invoice", source="demo", when=when)
+            written += 1
+        on_card_this_month = 0
+
         for category, freq, typical, spread in PATTERN:
             for _ in range(int(round(freq * drift))):
                 day = rng.randint(1, days)
@@ -122,13 +147,30 @@ def seed(con, months: int = 3) -> dict:
                     continue  # drawn, then discarded: keeps the RNG stream stable
                 when = (start + timedelta(days=day - 1)).replace(
                     hour=hour, minute=minute, tzinfo=tz)
+                method = "credit" if category in ON_CARD else "debit"
                 m.add_tx(con, cents, "expense", category,
                          note=rng.choice(NOTES.get(category, [""])),
-                         source="demo", when=when)
+                         source="demo", when=when, method=method)
                 written += 1
+                if method == "credit":
+                    on_card_this_month += cents
+        card_carried = on_card_this_month
+
+    for category, cents in BUDGETS:
+        if not con.execute("SELECT 1 FROM budget WHERE category = ?",
+                           (category,)).fetchone():
+            m.set_budget(con, category, cents)
+
+    # The account on the 1st, so the balance moves with this month's rows.
+    # Only when no real reading exists: the owner's figure always wins.
+    if not m.balance_anchor(con):
+        m.set_balance(con, OPENING_BALANCE, when=this_month.replace(hour=0, minute=1, tzinfo=tz))
+        m.set_cfg(con, "demo_balance", "1")
 
     return {"transactions": written, "months_complete": months,
             "plus_current_month_through": today.strftime("%Y-%m-%d"),
+            "budgets": [c for c, _ in BUDGETS],
+            "opening_balance_cents": OPENING_BALANCE,
             "seed": SEED}
 
 
@@ -136,6 +178,12 @@ def reset(con) -> dict:
     n = con.execute("DELETE FROM tx WHERE source = 'demo'").rowcount
     con.execute("DELETE FROM fixed WHERE label IN (%s)"
                 % ",".join("?" * len(FIXED)), [f[0] for f in FIXED])
+    for category, cents in BUDGETS:
+        # Only the ceilings this file wrote, at the values it wrote them.
+        con.execute("DELETE FROM budget WHERE category = ? AND amount_cents = ?",
+                    (category, cents))
+    if m.get_cfg(con, "demo_balance"):
+        con.execute("DELETE FROM config WHERE key IN ('balance_anchor', 'demo_balance')")
     con.commit()
     return {"removed": n}
 

@@ -3,8 +3,10 @@
     "name": "cfo-brief",
     "schedule": "0 * * * *",
     "script": "brief_gate.py",
-    "prompt": "Run the cfo-brief skill and send the brief named in the script output above. If there is nothing worth reporting, send nothing rather than padding it.",
-    "skills": ["cfo-brief"],
+    "prompt": "Run the cfo-brief skill and send the brief named in the script output above, written in the language it names. Run commands with the terminal tool (execute_code is blocked under cron). If there is nothing worth reporting, send nothing rather than padding it.",
+    "skills": [
+      "cfo-brief"
+    ],
     "deliver": "plow_chat:${PLOW_HOME_CHANNEL}"
   },
   {

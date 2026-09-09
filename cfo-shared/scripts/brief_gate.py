@@ -41,6 +41,14 @@ Two guarantees live here, and both are about the same failure mode:
     brief is recoverable; an unrequested notification is what gets the whole
     agent muted.
 
+When the gate opens it also says WHICH LANGUAGE the brief is written in. The
+brief is the one message with no owner's message above it to mirror, and on
+2026-09-09 it went out in Portuguese to an owner who had written nothing but
+English for a week -- because every worked example in the skills is
+Portuguese, and with nothing else to go on that was the loudest thing in the
+model's context. The language is a ledger setting now, and the gate reads it
+out as a fact in the prompt rather than a rule in a file.
+
 Run by the scheduler as `<python> brief_gate.py` with no arguments. Reads the
 same ledger money.py does, through money.py, so the owner's zone has exactly
 one definition in this repo.
@@ -124,6 +132,30 @@ def decide(now, hours: dict, opened: dict, grace: int = GRACE_HOURS):
     return None, None
 
 
+def announce(slot: str, hour: int, now, zone: str, con) -> str:
+    """The lines the agent reads above its prompt when the gate opens.
+
+    Facts, not instructions: which slot, what time it is for the owner, the
+    language they write in, and -- on a Monday morning -- that the week line
+    is worth including. Each is something the skill would otherwise have to
+    guess, and every guess it has made so far has been wrong at least once.
+    """
+    late = now.hour - hour
+    code = money.language_of(con)
+    name = money.LANGUAGE_NAMES.get(code, code)
+    lines = [
+        f"Brief slot: {slot}. It is {now:%H:%M} on {now:%Y-%m-%d} for the "
+        f"owner ({zone}); this slot is set to {hour:02d}:00"
+        + (f", so this run is {late}h late" if late else "") + ".",
+        f"Write it in {name} (the owner's language, `money.py config language`"
+        f" = {code}) -- not in the language of the examples.",
+    ]
+    if slot == "morning" and now.weekday() == 0:
+        lines.append("It is Monday for the owner: `money.py week` has last "
+                     "week against the week before, if either says something.")
+    return "\n".join(lines)
+
+
 def main() -> int:
     try:
         con = money.connect()
@@ -139,10 +171,7 @@ def main() -> int:
 
         opened[slot] = now.strftime("%Y-%m-%d")
         save_opened(opened)
-        late = now.hour - hour
-        print(f"Brief slot: {slot}. It is {now:%H:%M} on {now:%Y-%m-%d} for the "
-              f"owner ({zone}); this slot is set to {hour:02d}:00"
-              + (f", so this run is {late}h late" if late else "") + ".")
+        print(announce(slot, hour, now, zone, con))
         return 0
     except Exception:                            # noqa: BLE001
         traceback.print_exc(file=sys.stderr)

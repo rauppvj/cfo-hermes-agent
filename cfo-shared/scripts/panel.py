@@ -115,6 +115,13 @@ LANGUAGES = {
         "demo": "dados de exemplo, não os seus",
         "empty": "nada registrado ainda",
         "empty_hint": "mande uma mensagem para o agente: “gastei 40 no almoço”",
+        "in_account": "na conta",
+        "on_card": "na fatura, em aberto",
+        "nothing_open": "nada em aberto",
+        "no_balance": "diga ao agente quanto tem na conta",
+        "after_due": "%s depois das contas da semana",
+        "read_ago": "saldo lido há %d dias",
+        "of_limit": "de %s",
         "months": ("janeiro", "fevereiro", "março", "abril", "maio", "junho",
                    "julho", "agosto", "setembro", "outubro", "novembro",
                    "dezembro"),
@@ -152,6 +159,13 @@ LANGUAGES = {
         "demo": "sample data, not yours",
         "empty": "nothing logged yet",
         "empty_hint": "text the agent: “40 on lunch”",
+        "in_account": "in the account",
+        "on_card": "on the card, unpaid",
+        "nothing_open": "nothing open",
+        "no_balance": "tell the agent what is in the account",
+        "after_due": "%s after this week's bills",
+        "read_ago": "balance read %d days ago",
+        "of_limit": "of %s",
         "months": ("January", "February", "March", "April", "May", "June",
                    "July", "August", "September", "October", "November",
                    "December"),
@@ -159,15 +173,15 @@ LANGUAGES = {
     },
 }
 
-CURRENCY_LANGUAGE = {"BRL": "pt"}
-
-
 def language(con) -> str:
-    """The panel's language: the setting, else inferred from the currency."""
-    stored = (money.get_cfg(con, "language") or "").strip().lower()[:2]
-    if stored in LANGUAGES:
-        return stored
-    return CURRENCY_LANGUAGE.get(money.currency_of(con), "en")
+    """The panel's language: the owner's, when this file has words for it.
+
+    `money.language_of` is the one definition (setting, else currency). A
+    language the page has no dictionary for falls back to English rather
+    than to a KeyError on a wall at 3am.
+    """
+    code = money.language_of(con)
+    return code if code in LANGUAGES else "en"
 
 
 def panel_path(con=None) -> Path:
@@ -207,10 +221,13 @@ def snapshot(con, today=None) -> dict:
     day_prev = money.day_totals(con, money.yesterday_local(con, today=today),
                                 today=today)
 
+    budgets = {b["category"]: b
+               for b in money.budgets(con, today=today)["budgets"]}
     cats = []
     biggest = 0
     for row in money.by_category(con, month)[:TOP_CATEGORIES]:
         biggest = biggest or row["total"]        # the first is the largest
+        b = budgets.get(row["category"])
         cats.append({
             "category": row["category"],
             "label": words["cats"].get(row["category"], row["category"]),
@@ -220,7 +237,16 @@ def snapshot(con, today=None) -> dict:
             # to each other stay legible when one category is most of the
             # spending, which in a real ledger with rent in it is normal.
             "share": round(100 * row["total"] / biggest) if biggest else 0,
+            # A budgeted line is drawn against ITS OWN ceiling instead, and
+            # turns red past it. The bar answers a different question then
+            # -- "how much of what I allowed" -- and the number beside it
+            # says so.
+            "limit_fmt": money.fmt(b["limit_cents"], cur) if b else None,
+            "pct_of_limit": min(100, b["pct"]) if b else None,
+            "over": bool(b and b["over"]),
         })
+
+    bal = money.balance(con, today=today)
 
     # Bills only. A salary landing on the 5th is real and the brief may well
     # mention it, but under a heading that reads "due within 7 days" it is
@@ -272,6 +298,22 @@ def snapshot(con, today=None) -> dict:
                  for d in money.daily_totals(con, month, today=today)],
         "upcoming": [{**d, "amount_fmt": money.fmt(d["amount_cents"], cur)}
                      for d in due],
+        # The two figures a bank app shows and a ledger cannot: what is in
+        # the account, and what the card already holds for next month. Both
+        # come from money.balance(), which refuses to guess the first one
+        # without a reading the owner gave it.
+        "balance": {
+            "has_anchor": bal["has_anchor"],
+            "balance_fmt": (money.fmt(bal["balance_cents"], cur)
+                            if bal["has_anchor"] else None),
+            "negative": bool(bal["has_anchor"] and bal["balance_cents"] < 0),
+            "anchor_age_days": bal.get("anchor_age_days"),
+            "after_due_fmt": (money.fmt(bal["after_due_soon_cents"], cur)
+                              if bal["has_anchor"] and bal["due_soon_cents"]
+                              else None),
+            "card_open": bal["card_open_cents"],
+            "card_open_fmt": money.fmt(bal["card_open_cents"], cur),
+        },
         # Said once, on the page, for the same reason the brief says it: a
         # seeded month that reads as the owner's own is a number they will
         # act on.
@@ -338,10 +380,14 @@ h1 small { color: var(--faint); font-weight: 500; }
 .day .label small { color: var(--faint); }
 .day .figure { font-size: clamp(24px, 3.2vw, 38px); font-weight: 620; letter-spacing: -0.02em; margin-top: 4px; }
 .day .figure.quiet { color: var(--faint); font-weight: 560; font-size: clamp(17px, 2vw, 22px); }
+.day .figure.red { color: var(--warn); }
+.day .sub { color: var(--faint); font-size: clamp(12px, 1.2vw, 14px); margin-top: 4px; }
 h2 { margin: 0 0 14px; font-size: clamp(12px, 1.2vw, 14px); font-weight: 600; color: var(--dim); text-transform: lowercase; letter-spacing: 0.02em; }
 .rows { display: grid; gap: 11px; }
 .row { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px; font-size: clamp(14px, 1.5vw, 17px); }
 .row .amount { font-weight: 600; }
+.row .amount small { color: var(--faint); font-weight: 500; }
+.track span.over { background: var(--warn); }
 .row .when { color: var(--faint); font-size: 0.85em; }
 .track { grid-column: 1 / -1; height: 6px; border-radius: 99px; background: var(--bar); overflow: hidden; margin-top: -4px; }
 .track span { display: block; height: 100%; min-width: 4px; border-radius: 99px; background: var(--accent); opacity: 0.8; }
@@ -482,13 +528,44 @@ def render(snap: dict) -> str:
             f'{day_card(snap["today"], w["today"], w["so_far"])}'
             f'{day_card(snap["yesterday"], w["yesterday"])}</div>')
 
+    # --- in the account, and on the card ----------------------------------
+    b = snap["balance"]
+    if b["has_anchor"]:
+        figure = (f'<div class="figure{" red" if b["negative"] else ""}">'
+                  f'{_esc(b["balance_fmt"])}</div>')
+        if b["after_due_fmt"]:
+            sub = f'<div class="sub">{_esc(w["after_due"] % b["after_due_fmt"])}</div>'
+        elif b["anchor_age_days"]:
+            sub = f'<div class="sub">{_esc(w["read_ago"] % b["anchor_age_days"])}</div>'
+        else:
+            sub = ""
+    else:
+        figure = f'<div class="figure quiet">{_esc(w["no_balance"])}</div>'
+        sub = ""
+    account = (f'<section class="card day"><div class="label">'
+               f'{_esc(w["in_account"])}</div>{figure}{sub}</section>')
+    if b["card_open"]:
+        card_figure = f'<div class="figure">{_esc(b["card_open_fmt"])}</div>'
+    else:
+        card_figure = f'<div class="figure quiet">{_esc(w["nothing_open"])}</div>'
+    card = (f'<section class="card day"><div class="label">'
+            f'{_esc(w["on_card"])}</div>{card_figure}</section>')
+    money_pair = f'<div class="pair">{account}{card}</div>'
+
     # --- categories --------------------------------------------------------
-    cat_rows = "".join(
-        f'<div class="row"><span>{_esc(c["label"])}</span>'
-        f'<span class="amount">{_esc(c["total_fmt"])}</span>'
-        f'<span class="track"><span style="width:{c["share"]}%"></span></span>'
-        f'</div>'
-        for c in snap["categories"])
+    def cat_row(c: dict) -> str:
+        amount = _esc(c["total_fmt"])
+        if c["limit_fmt"]:
+            amount += f' <small>{_esc(w["of_limit"] % c["limit_fmt"])}</small>'
+            width, cls = c["pct_of_limit"], (' class="over"' if c["over"] else "")
+        else:
+            width, cls = c["share"], ""
+        return (f'<div class="row"><span>{_esc(c["label"])}</span>'
+                f'<span class="amount">{amount}</span>'
+                f'<span class="track"><span{cls} style="width:{width}%"></span></span>'
+                f'</div>')
+
+    cat_rows = "".join(cat_row(c) for c in snap["categories"])
     cats = (f'<section class="card"><h2>{_esc(w["categories"])}</h2>'
             f'<div class="rows">{cat_rows}</div></section>')
 
@@ -506,7 +583,7 @@ def render(snap: dict) -> str:
                 f'{_esc(w["upcoming"] % UPCOMING_DAYS)}</h2>'
                 f'<div class="rows">{due_rows}</div></section>')
 
-    return (head + f'<div class="wrap">{header}{hero}{pair}'
+    return (head + f'<div class="wrap">{header}{hero}{pair}{money_pair}'
             f'<div class="cols">{cats}{upcoming}</div></div>\n'
             "</body>\n</html>\n")
 
