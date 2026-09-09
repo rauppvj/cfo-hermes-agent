@@ -92,6 +92,24 @@ RULES = [
 strip_accents = m.strip_accents
 
 
+# The bank statement's side of the card being paid. On the invoice the same
+# money is "Inclusao de Pagamento" and is skipped; here it is the account
+# paying the issuer. Neither is spending: the purchases were recorded when
+# they happened (from the invoice, or from the chat). Imported as an expense
+# it doubles every one of them, and "other" was the biggest line of a month.
+CARD_PAYMENT_NEEDLES = [
+    "pgto fat", "pgto cartao", "pagto fatura", "pagamento fatura",
+    "pagamento de fatura", "pagamento cartao", "pag fatura", "fatura cartao",
+    "credit card payment", "card payment", "payment to card", "cc payment",
+    "pgto cc",
+]
+
+
+def is_card_payment(description: str) -> bool:
+    d = strip_accents(description or "").lower()
+    return any(strip_accents(n) in d for n in CARD_PAYMENT_NEEDLES)
+
+
 def categorize(description: str) -> str:
     d = strip_accents(description or "").lower()
     for category, needles in RULES:
@@ -744,6 +762,7 @@ def extract_card(path: Path, mapping: dict,
             continue
         rows.append({
             "day": hit["date"], "amount_cents": abs(cents), "kind": "expense",
+            "method": "credit",
             "description": hit["description"],
             "category": categorize(hit["description"]),
         })
@@ -786,6 +805,17 @@ def apply(con, path: Path, mapping: dict, dry_run: bool = True,
         batch_seen.add(r["hash"])
         fresh.append(r)
 
+    # After the hashes are stamped, so a row this importer once filed as an
+    # expense still matches itself on a re-import instead of arriving twice.
+    card_payments = 0
+    card_paid = 0
+    for r in fresh:
+        if r["kind"] == "expense" and r.get("method", "debit") == "debit" \
+                and is_card_payment(r["description"]):
+            r["kind"], r["category"] = "transfer", m.CARD_PAYMENT
+            card_payments += 1
+            card_paid += r["amount_cents"]
+
     days = sorted({r["day"] for r in rows})
     by_cat: dict[str, int] = {}
     total_expense = total_income = 0
@@ -793,7 +823,7 @@ def apply(con, path: Path, mapping: dict, dry_run: bool = True,
         if r["kind"] == "expense":
             total_expense += r["amount_cents"]
             by_cat[r["category"]] = by_cat.get(r["category"], 0) + r["amount_cents"]
-        else:
+        elif r["kind"] == "income":
             total_income += r["amount_cents"]
 
     batch = batch or datetime.now().strftime("%Y%m%d%H%M%S")
@@ -809,6 +839,11 @@ def apply(con, path: Path, mapping: dict, dry_run: bool = True,
         "period": {"from": days[0], "to": days[-1]} if days else None,
         "expense": total_expense,
         "income": total_income,
+        # Settled invoices found on the statement: recorded as transfers,
+        # which move the balance and no category. Named so the owner can be
+        # told why their biggest line is not spending.
+        "card_payments": {"count": card_payments, "total": card_paid},
+        "on_card": bool(fresh) and all(r.get("method") == "credit" for r in fresh),
         "by_category": sorted(
             ({"category": k, "total": v} for k, v in by_cat.items()),
             key=lambda x: -x["total"]),
@@ -831,7 +866,8 @@ def apply(con, path: Path, mapping: dict, dry_run: bool = True,
             hour=12, tzinfo=tz)  # midday: never straddles a zone boundary
         m.add_tx(con, r["amount_cents"], r["kind"], r["category"],
                  note=f"{r['description']} #{r['hash']}",
-                 source=f"import:{batch}", when=when)
+                 source=f"import:{batch}", when=when,
+                 method=r.get("method", "debit"))
     summary["imported"] = len(fresh)
     summary["undo"] = f"statement.py undo {batch}"
     return summary
@@ -867,7 +903,8 @@ def detect_recurring(con, min_occurrences: int = 3) -> dict:
     """
     rows = con.execute(
         "SELECT day_local, amount_cents, kind, note FROM tx"
-        " WHERE source LIKE 'import:%' ORDER BY day_local").fetchall()
+        " WHERE source LIKE 'import:%' AND kind != 'transfer'"
+        " ORDER BY day_local").fetchall()
 
     groups: dict[tuple, list] = {}
     for r in rows:
