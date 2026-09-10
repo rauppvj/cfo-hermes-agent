@@ -9,9 +9,9 @@ anyone but your own agent.
 
 | channel | catches | needs |
 |---|---|---|
-| **Wallet tap** | every Apple Pay purchase — in a shop, online, in an app | one shortcut + one automation on the iPhone |
+| **Wallet tap** | every Apple Pay purchase **at a terminal** — the phone or watch held to the reader | one shortcut + one automation on the iPhone |
 | **bank SMS** | every purchase your bank texts about — physical card included | one shortcut + one automation on the iPhone |
-| **bank push** | every purchase your bank app notifies — physical card, débito, Pix; the banks that never send SMS | the Mac: iPhone Mirroring + one script |
+| **bank push** | every purchase your bank app notifies — physical card, débito, Pix, **Apple Pay inside an app or a website**; the banks that never send SMS | the Mac: iPhone Mirroring + one script |
 
 One purchase often arrives on two of them within a minute. It is recorded
 **once**, and the bank's text decides one thing the tap cannot know: whether
@@ -181,9 +181,16 @@ typed; the agent treats it as a fact, not a sentence:
 - A bank that neither texts nor pushes, or a purchase made while the Mac was
   off: the **statement import** at month end catches it, deduplicated
   against what was already logged.
-- The Transaction trigger is known to **time out** on some phones and the
-  automation quietly does not fire (Apple's own forums carry the reports).
-  The push channel and the evening brief are the safety net.
+- **Apple Pay inside an app or on a website does not fire the Wallet
+  trigger.** Apple's guide describes it as *"whenever it's tapped"*, people
+  who tested it report NFC only, and one iFood order paid with Apple Pay
+  (Face ID and all) produced a bank push and no automation. Nothing to fix
+  in the shortcut: that purchase is the bank push channel's job, and the
+  same purchase is never logged twice when both arrive.
+- The trigger is also known to **time out** on some phones when the card
+  issuer is slow to report, and the automation quietly does not fire
+  (Apple's own forums carry the reports). The push channel and the evening
+  brief are the safety net.
 - Android has no Wallet trigger and no Mac mirroring. Automation apps there
   (MacroDroid, Tasker) can forward notifications as an SMS; the agent reads a
   `📩` message the same way whoever sent it.

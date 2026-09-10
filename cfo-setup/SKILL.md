@@ -143,13 +143,14 @@ purchases by itself, there is a real answer, and it is two taps plus one
 step on their iPhone. Two shortcuts are built and signed in the repo; each
 one texts you a purchase the moment it happens:
 
-- **Apple Pay** — every card tap in Wallet, in a shop or online:
+- **Apple Pay** — every card tap at a terminal (the trigger does not fire
+  for Apple Pay inside an app or a website; the bank's push catches those):
   https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/shortcuts/cfo-apple-pay.shortcut
 - **the bank's SMS** — every purchase the bank texts about, Apple Pay or not:
   https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/shortcuts/cfo-bank-sms.shortcut
 - **the bank's push notifications**, through the Mac — the channel that
-  catches the physical card, débito, and the banks that never send SMS
-  (Nubank, Inter...). Not a shortcut: on the Mac, in the repo checkout,
+  catches the physical card, débito, Apple Pay in apps and websites, and
+  the banks that never send SMS (Nubank, Inter...). Not a shortcut: on the Mac, in the repo checkout,
   `scripts/install-notify.sh`, then two toggles it prints (Full Disk Access
   for `/usr/bin/python3`; "Allow notifications from iPhone"). Needs iPhone
   Mirroring, so macOS 15+ and iOS 18+.
