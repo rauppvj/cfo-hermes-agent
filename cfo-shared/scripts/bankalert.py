@@ -49,12 +49,16 @@ METHOD_CREDIT = re.compile(r"\b(credito|credit|fatura|parcelad[ao]|\d+x)\b")
 STOP = (r"(?:foi|was|is|esta|no|na|com|para|as|às|em|dia|final|cartao|cart[aã]o|"
         r"aprovad\w*|approved|autorizad\w*|on|using|with|creditad\w*|debitad\w*|"
         r"parcelad\w*|\d{1,2}/\d{1,2})")
+# A name runs to the next clause. A dot ends a clause -- "Padaria. Criciúma,
+# SC" -- except when a digit follows it: delivery apps and acquirers put an
+# order or terminal number in the name, "IFD*56.184.581 RESTAURANTE", and
+# cutting at the first dot left "IFD*56" in the ledger.
+NAME = r"(?P<m>(?:[^,.;\n]|\.(?=\d))+?)"
+END = r"(?=\s+" + STOP + r"\b|\s*(?:[,;\n]|\.(?!\d))|$)"
 AFTER_AMOUNT = re.compile(
-    r"^\s*(?:,\s*|[-–—]\s*|(?:de|em|at|para|to|from)\s+)"
-    r"(?P<m>[^,.;\n]+?)(?=\s+" + STOP + r"\b|\s*[,.;\n]|$)", re.I)
+    r"^\s*(?:,\s*|[-–—]\s*|(?:de|em|at|para|to|from)\s+)" + NAME + END, re.I)
 ANYWHERE = re.compile(
-    r"\b(?:em|at|no estabelecimento|na loja|para|to)\s+"
-    r"(?P<m>[^,.;\n]+?)(?=\s+" + STOP + r"\b|\s*[,.;\n]|$)", re.I)
+    r"\b(?:em|at|no estabelecimento|na loja|para|to)\s+" + NAME + END, re.I)
 NOISE_TAIL = re.compile(r"\s*(?:\*+\d{4}|final \d{4})\s*$", re.I)
 DATE_LIKE = re.compile(r"^\d{1,2}/\d{1,2}(?:/\d{2,4})?(?:\s+\d{1,2}:\d{2})?$")
 
@@ -93,7 +97,7 @@ def _merchant(raw: str, amount_match, body: str | None = None,
     # nothing else in it says "compra". Only when nothing better was found,
     # and only for a short clause -- a bank's sentence is never five words.
     if wallet and body:
-        first = re.split(r"[.\n]", body.strip(), maxsplit=1)[0].strip()
+        first = re.split(r"\.(?!\d)|\n", body.strip(), maxsplit=1)[0].strip()
         if first and len(first.split()) <= 6 and not AMOUNT.search(first):
             return first
     return None

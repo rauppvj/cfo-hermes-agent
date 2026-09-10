@@ -170,6 +170,7 @@ def test_detect_proposes_but_never_writes(st, con):
 
 @pytest.mark.parametrize("description,category", [
     ("IFOOD *RESTAURANTE", "food"),
+    ("IFD*12.345.678 RESTAURANTE BOM PRATO CIDADE BRA", "food"),
     ("SUPERMERCADO ANGELONI", "groceries"),
     ("UBER *TRIP", "transport"),
     ("NETFLIX.COM", "subscriptions"),

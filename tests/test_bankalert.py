@@ -87,3 +87,28 @@ def test_apple_wallets_own_notification_is_a_purchase_named_by_its_first_clause(
     assert p["method"] is None          # Wallet does not know débito from crédito
     # the same text from an unknown app names no event and is not logged
     assert bankalert.parse("C6 Bank " + body, body=body)["ok"] is False
+
+
+# The night a delivery-app purchase arrived: the bank names the payee
+# "IFD*<order number> <restaurant> <city> BRA", and the order number carries
+# dots. The first version of the reader ended the name at the first dot and
+# "IFD*56" went into the ledger -- unclassifiable, and not the shop.
+def test_a_dotted_order_number_is_part_of_the_merchant_name():
+    text = ("Compra no crédito aprovada Sua compra no cartão final 4321 no valor "
+            "de R$ 48,20, dia 09/09/2026 às 21:04, em IFD*12.345.678 RESTAURANTE "
+            "BOM PRATO CIDADE BRA, foi aprovada.")
+    p = bankalert.parse(text)
+    assert p["ok"] and p["amount_cents"] == 4820 and p["method"] == "credit"
+    assert p["merchant"] == "IFD*12.345.678 RESTAURANTE BOM PRATO CIDADE BRA"
+
+
+def test_wallets_notification_for_a_dotted_merchant_keeps_the_whole_name():
+    body = "IFD* 12.345.678 Restaurante Bom Prato\nR$ 48,20"
+    p = bankalert.parse("Banco X " + body, app="com.apple.Passbook", body=body)
+    assert p["ok"] and p["event"] == "purchase" and p["amount_cents"] == 4820
+    assert p["merchant"] == "IFD* 12.345.678 Restaurante Bom Prato"
+
+
+def test_a_dot_before_a_word_still_ends_the_name():
+    p = bankalert.parse("Compra aprovada: R$ 12,00 em PADARIA CENTRAL. Fale com o banco.")
+    assert p["merchant"] == "PADARIA CENTRAL"

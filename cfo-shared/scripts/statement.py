@@ -59,7 +59,7 @@ RULES = [
                    "whole foods", "trader joe", "kroger", "safeway", "costco",
                    "publix", "lidl", "sam's club", "pao de acucar", "sendas",
                    "big bompreco", "zaffari", "angeloni"]),
-    ("food", ["restaurant", "ifood", "rappi", "uber eats", "doordash", "lanche",
+    ("food", ["restaurant", "ifood", "ifd*", "rappi", "uber eats", "doordash", "lanche",
               "padaria", "bakery", "cafe", "café", "coffee", "starbucks",
               "mcdonald", "burger", "pizza", "bar ", "delivery"]),
     ("transport", ["uber", "99app", "99 ", "lyft", "posto", "shell", "ipiranga",
