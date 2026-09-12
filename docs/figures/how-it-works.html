@@ -1,0 +1,125 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>cfo — four ways in, one ledger</title>
+<style>
+  :root{
+    --bg:#0d0f12; --panel:#15181d; --ink:#f2f4f7; --dim:#9aa3ad;
+    --faint:#5b646f; --line:#23272e; --accent:#6ee7a8; --warn:#ff8f7a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{padding:44px 52px}
+  h1{font-size:30px;margin:0 0 4px;letter-spacing:-.4px}
+  h1 span{color:var(--faint);font-weight:400}
+  .sub{color:var(--dim);margin:0 0 34px;font-size:15px}
+  .flow{display:grid;grid-template-columns:1fr 44px 1.05fr 44px 1fr;align-items:center;gap:0}
+  .col{display:flex;flex-direction:column;gap:12px}
+  .eyebrow{font-size:12px;letter-spacing:.10em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:14px 16px}
+  .card b{display:block;font-size:15px;font-weight:600}
+  .card i{display:block;font-style:normal;color:var(--dim);font-size:13.5px;margin-top:3px}
+  .card .k{color:var(--faint);font-size:12.5px;margin-top:6px;font-variant-numeric:tabular-nums}
+  .arrow{color:var(--faint);text-align:center;font-size:22px;line-height:1}
+  .hub{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:20px;box-shadow:0 0 0 1px rgba(110,231,168,.10), 0 18px 40px -24px rgba(0,0,0,.9)}
+  .hub .big{font-size:22px;font-weight:600;letter-spacing:-.2px}
+  .hub .path{color:var(--accent);font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+    margin-top:2px}
+  .rule{border:0;border-top:1px solid var(--line);margin:14px 0}
+  .hub p{margin:0;color:var(--dim);font-size:13.5px}
+  .hub p+p{margin-top:8px}
+  .hub strong{color:var(--ink);font-weight:600}
+  .note{margin-top:30px;color:var(--faint);font-size:13px;display:flex;gap:26px;flex-wrap:wrap}
+  .note b{color:var(--dim);font-weight:500}
+  .tag{display:inline-block;font-size:11.5px;color:var(--accent);
+    border:1px solid rgba(110,231,168,.28);border-radius:999px;padding:1px 8px;
+    margin-left:8px;vertical-align:2px}
+</style>
+<div class="wrap">
+  <h1>Four ways in, one ledger, <span>two surfaces</span></h1>
+  <p class="sub">A financial manager you text. The typing is the fallback, not the interface.</p>
+
+  <div class="flow">
+    <div class="col">
+      <div class="eyebrow">what reaches it</div>
+      <div class="card">
+        <b>💳 a card tap</b>
+        <i>an iPhone Shortcut on the Wallet's own transaction trigger</i>
+        <div class="k">amount · shop · card, before you put the phone away</div>
+      </div>
+      <div class="card">
+        <b>🔔 the bank's own notification</b>
+        <i>a watcher on your Mac reads what your iPhone mirrors</i>
+        <div class="k">the physical card, débito, Pix, a card saved in an app</div>
+      </div>
+      <div class="card">
+        <b>📄 a statement or an invoice</b>
+        <i>CSV, or a PDF where the bank offers no export</i>
+        <div class="k">90 days of history from one file</div>
+      </div>
+      <div class="card">
+        <b>💬 or a sentence</b>
+        <i>“gastei 40 no almoço” · “Saturday I paid the car, 118.60”</i>
+        <div class="k">in whatever language you write in</div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <div class="hub">
+      <div class="big">the ledger</div>
+      <div class="path">~/…/cfo/ledger.db · SQLite</div>
+      <hr class="rule">
+      <p><strong>Every figure the agent says comes from a field here.</strong>
+         Not from its own addition, not from a number earlier in the
+         conversation. A model that adds a column will one day add it wrong,
+         in the same confident voice.</p>
+      <p><strong>Spending and the account are different questions.</strong>
+         A card purchase is spending today and leaves the account when the
+         invoice is paid. Paying it is a transfer, not an expense.</p>
+      <p><strong>The day is yours, not UTC's.</strong> Every row stores the
+         instant and your local day, so an expense at 22:00 is not tomorrow's
+         — and on the 31st, not next month's.</p>
+      <hr class="rule">
+      <p style="color:var(--faint)">It is a file on your machine. No server,
+         no account, nothing synced.</p>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <div class="col">
+      <div class="eyebrow">what you see</div>
+      <div class="card">
+        <b>the chat<span class="tag">you ask</span></b>
+        <i>“how much do I have?” · “can I afford a 2,000 monitor?”</i>
+        <div class="k">one answer, then at most one observation</div>
+      </div>
+      <div class="card">
+        <b>08:00, where you live<span class="tag">unprompted</span></b>
+        <i>what yesterday cost, what is in the account, where the month is
+           heading at this pace</i>
+        <div class="k">and 22:00 only when the day gave it something to say</div>
+      </div>
+      <div class="card">
+        <b>the wall panel<span class="tag">you walk past</span></b>
+        <i>one page on your own disk, full-screen on a spare monitor</i>
+        <div class="k">redrawn on every write · no model, no server, no port</div>
+      </div>
+      <div class="card">
+        <b>a CSV, any time</b>
+        <i>“send me my spending”</i>
+        <div class="k">the way out is a file you already have</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <span><b>Runs</b> as one Docker container on your own machine</span>
+    <span><b>Reaches you</b> through Plow Chat — it is a text thread, not a terminal</span>
+    <span><b>Sends out</b> one thing: how many tokens it used</span>
+  </div>
+</div>
