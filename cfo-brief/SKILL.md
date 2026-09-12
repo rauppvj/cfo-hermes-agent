@@ -121,7 +121,27 @@ is:
   passed its ceiling, a category that passed last month's whole total;
 - the balance needs a reading: `balance.has_anchor` is false and the owner
   is set up otherwise, or `basis.stale` is true. Ask for it — once, in one
-  sentence, and not two evenings in a row.
+  sentence, and not two evenings in a row;
+- **something the automation logged today has no name.** A card tap carries
+  whatever the terminal sent, and some send the city, or an order number, and
+  nothing a category can be read from — so the row is filed `other` with that
+  string as its note, on purpose, because a one-line confirmation is not the
+  place for a question. Tonight is. In `recent`, a row from **today** whose
+  `category` is `other` and whose `note` is not a shop anyone would recognise
+  is the one thing this message is for: the owner still remembers what it was,
+  and tomorrow they will not.
+
+  One clause, at the end, with the amount and what the terminal did send:
+  *"— and the R$ 21,50 in Curitiba: groceries, lunch, something else?"* Their
+  one-word answer is a correction the engine already takes (`edit <id>
+  --category`), and naming it also teaches the merchant, so the same shop is
+  never asked about twice. Cap it at **two** rows; more than that is a list,
+  and a list is a form.
+
+  **Only today's rows.** Yesterday's uncategorised purchase is the import's
+  job (`money.py uncategorized`), not a second evening's question — and
+  bounding the ask to today is what keeps it from repeating for a row the
+  owner has decided to leave as it is.
 
 An evening with nothing logged and nothing due gets **no message**. Not a
 nudge, not "nada registrado hoje" — that is a notification whose whole content
