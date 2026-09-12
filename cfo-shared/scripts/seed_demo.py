@@ -61,11 +61,20 @@ PATTERN = [
 ON_CARD = {"leisure", "shopping", "subscriptions"}
 CARD_PAY_DAY = 10
 
+# Spread across the month on purpose. The panel's "due within 7 days" card
+# and the brief's "after this week's bills" line are windows onto TODAY, so a
+# sample whose bills all fall on the 5th and the 10th shows an empty card to
+# anyone who seeds it after the 12th -- which was every screenshot taken on
+# 2026-09-12. Five dates, five days apart, means any day of the month has two
+# or three bills in view.
 FIXED = [
-    ("rent",     180000, "expense", 5),
-    ("internet",  14990, "expense", 10),
-    ("phone",      8990, "expense", 12),
-    ("salary",   700000, "income",  5),
+    ("rent",        180000, "expense", 5),
+    ("internet",     14990, "expense", 10),
+    ("phone",         8990, "expense", 12),
+    ("electricity",  21050, "expense", 16),
+    ("gym",           9900, "expense", 20),
+    ("health plan",  34820, "expense", 25),
+    ("salary",      700000, "income",  5),
 ]
 
 # A ceiling per category, in cents. Food sits near its line by design.

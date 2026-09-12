@@ -11,3 +11,4 @@ __pycache__/
 panel/
 # The credential `plow-agents mint` writes. One install, one token, never committed.
 plow-credentials
+.DS_Store
