@@ -1,0 +1,8 @@
+#!/bin/sh
+# This agent's own context settings, merged into the home's config.yaml before
+# any service starts. See /opt/plow/cfo-config.py for what and why.
+#
+# After 00-plow-sanitize, which seeds config.yaml when the home has none, and
+# before plow-init, which asserts the keys the image owns. Ordering is by name
+# and that is the whole reason for the 20.
+exec /opt/hermes/.venv/bin/python3 /opt/plow/cfo-config.py

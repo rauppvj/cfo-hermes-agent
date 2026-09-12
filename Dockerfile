@@ -98,7 +98,11 @@ RUN set -eu; \
 # --------------------------------------------------------------------------
 COPY image/s6-overlay/ /etc/s6-overlay/
 COPY image/cont-init.d/10-cfo-dirs /etc/cont-init.d/10-cfo-dirs
-RUN chmod 0755 /etc/cont-init.d/10-cfo-dirs \
+COPY image/cont-init.d/20-cfo-config /etc/cont-init.d/20-cfo-config
+COPY image/scripts/cfo-config.py /opt/plow/cfo-config.py
+RUN chmod 0644 /opt/plow/cfo-config.py \
+ && chmod 0755 /etc/cont-init.d/10-cfo-dirs \
+      /etc/cont-init.d/20-cfo-config \
       /etc/s6-overlay/s6-rc.d/agent-index/run \
       /etc/s6-overlay/s6-rc.d/cfo-panel/run \
       /etc/s6-overlay/s6-rc.d/cfo-schedule/run

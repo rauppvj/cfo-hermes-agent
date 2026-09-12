@@ -55,3 +55,61 @@ plugins:
 platforms:
   plow_chat:
     enabled: true
+
+# --------------------------------------------------------------------------
+# Context, bounded -- which for this agent is a correctness setting
+# --------------------------------------------------------------------------
+# On 2026-09-10 two card taps reached this instance, at 18:24 and 21:40.
+# Neither was recorded. The first got a reply ninety-one minutes later that
+# loaded a skill and then stopped; the second got no turn at all. Both were
+# logged at 22:18 by the evening brief -- a different job, in a different
+# session. The gateway was up, the container was healthy, and nothing said a
+# message had been dropped. The log:
+#
+#     Codex stream produced no SSE events for 5443s after first byte
+#     (threshold 180s, model=gpt-5.6-sol, context=~173,010 tokens)
+#
+# This DM had been open since 2026-08-31: twelve days, 342 messages, 730KB in
+# the store -- 320KB of content, 51KB of tool calls, and 329KB of the
+# provider's own reasoning items, replayed on every turn. At ~175,000 tokens
+# the provider sent a first byte and then nothing for as long as the
+# connection stayed open.
+#
+# Three defaults, each defensible alone, add up to that:
+#   * session_reset.mode is `none` since July 2026 -- people expect a
+#     conversation to persist -- so nothing ever rotates;
+#   * compression.threshold is a RATIO of the window, and the Codex autoraise
+#     lifts it further for the 272K family, so full compression waits for
+#     ~218,000 tokens, past where this provider goes quiet;
+#   * compression.proactive_prune_tokens is 0, so old tool results ride in
+#     history and are re-sent verbatim, forever.
+#
+# Present despite the "absent keys mean image defaults" rule above, and this
+# is the clearest case for that rule's exception: the shape of this agent's
+# conversation is its own. Short messages, JSON results the owner never sees,
+# and **a memory that is not the transcript**. The ledger is the memory --
+# nothing said three weeks ago is load-bearing, because it is a row in
+# SQLite. That is why this agent can afford a bounded context where a coding
+# agent cannot, and why losing a session costs it nothing.
+session_reset:
+  # Whichever comes first: half a day of silence, or 04:00. Overnight covers
+  # it almost every night, without cutting into a conversation in progress.
+  mode: both
+  at_hour: 4
+  idle_minutes: 720
+  # A 4am "your session was reset" notification, every day, is how a useful
+  # agent gets muted. Nothing is lost that the owner would need to be told
+  # about: the ledger is the memory.
+  notify: false
+compression:
+  # Above this, the deterministic no-LLM prune reclaims old tool output --
+  # dedup, summarize, truncate. No model call, no quality risk.
+  proactive_prune_tokens: 40000
+  # An absolute floor under the ratio: compression fires at whichever is
+  # lower. A third of this provider's 272K window, and roughly half of where
+  # it was measured going quiet. In-place compaction also REBUILDS THE SYSTEM
+  # PROMPT, which is the second half of the fix: this session pinned its
+  # prompt on 2026-08-31, so twelve days of persona work -- the language rule,
+  # the spending-is-not-the-balance rule -- had never reached the running
+  # conversation at all.
+  threshold_tokens: 90000
