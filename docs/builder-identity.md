@@ -27,6 +27,19 @@ so the page picked the name up in seconds.
 
 ---
 
+**And since 2026-09-12 there is a CLI for it**, which is the supported path
+now and takes a photo as well as a name:
+
+```sh
+plow-agents profile --name "Vinicius"          # the name the index renders
+plow-agents profile --photo ./avatar.png       # a local file Plow hosts, or an https URL
+plow-agents profile --show
+```
+
+It writes the same account profile as the PATCH above, with the **account**
+token from `plow-agents login` rather than an agent's. The index resolves the
+builder per request either way, so the page shows the change immediately.
+
 ## What it was (kept, 2026-09-04)
 
 The `cfo` page on the Agent Index was complete except for one thing: where it
@@ -117,8 +130,8 @@ one returned, rather than to guess at a workaround.
 ## Checking it
 
 Nothing here needs redeploying. The index resolves the profile per request, so
-the page picks up a name the moment Plow holds one — no re-registration, no
-`agent-mgr deploy`. Check it with:
+the page picks up a name the moment Plow holds one — no re-registration and no
+rebuild. Check it with:
 
 ```sh
 curl -s "https://agent-index-server.vercel.app/v1/agents?agent_id=cfo" \

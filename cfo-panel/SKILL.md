@@ -16,18 +16,24 @@ ask and Latch is available.
 
 ## Where it is
 
-    $HERMES_HOME/cfo/panel/index.html
-
-That path is inside the instance's home, which is a folder **on the owner's
-own Mac** — `~/.hermes-<name>/cfo/panel/index.html`. It opens by double
-click, in any browser, over no network. There is no server and no port, and
-nothing about the page reaches anyone else.
-
-To give them the path, read it rather than typing it from memory:
+**Read the path; never type it from memory.** It moved, and the two contracts
+answer differently:
 
 ```sh
 python3 $HERMES_HOME/skills/cfo-shared/scripts/panel.py --json | head -5
 ```
+
+- **`/srv/cfo/panel/index.html`** on the current contract (`$CFO_PANEL` names
+  it). The agent's home is a Docker volume there, so the page is written into
+  a directory the compose file mounts from the owner's Mac — which is the
+  whole point: a page inside a volume is a page nobody can open. On their Mac
+  it is `panel/index.html` **inside the checkout they installed from**, and
+  `open panel/index.html` from that directory is the whole instruction.
+- **`$HERMES_HOME/cfo/panel/index.html`** on an instance from the deprecated
+  deployer, whose home IS a folder on the Mac (`~/.hermes-<name>/`).
+
+Either way it opens by double click, in any browser, over no network. There is
+no server and no port, and nothing about the page reaches anyone else.
 
 ## It refreshes itself
 
@@ -65,9 +71,13 @@ python3 $HERMES_HOME/skills/cfo-shared/scripts/panel.py
 Latch is optional and most installs do not have it. When this instance has
 it, "abre o painel" is one command **on the Mac**, not in this container:
 
-    open ~/.hermes-<name>/cfo/panel/index.html
+    open <the checkout>/panel/index.html      # current contract
+    open ~/.hermes-<name>/cfo/panel/index.html # the deprecated deployer
 
-Use the instance's own name. If reaching the Mac fails, that is not an error
+Read which one this instance is from `panel.py --json`, above — the path it
+prints is the one inside the container, and its last two segments
+(`panel/index.html`) are what the owner opens on their side of the mount. If
+reaching the Mac fails, that is not an error
 to report as a failure of the panel — **give them the path** and say it opens
 by double click. The panel is a file on their disk either way; Latch only
 saves them the walk to Finder.
