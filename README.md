@@ -374,13 +374,17 @@ it at all. Every total it reports still comes from `money.py`.
 **Step by step, with what each stop asks you for: [`docs/INSTALL.md`](docs/INSTALL.md).**
 
 Prerequisites: `docker` running with Compose v2, `python3`, `git`, and a Plow
-account. **That is the whole list** — and it is the list that matters, because
-the Agent Index publishes an install-success rate per agent and this one read
-33% under the old one. What left it: an authenticated GitHub CLI (the
-deprecated deployer fetched the chat plugin with `gh`), a model-provider
-device-code sign-in, a registry row tying one checkout to one instance, and an
-`activate` step that minted a credential, DM'd the owner, bound the agent
-permanently to whichever handset answered, and could never be repeated.
+account. **That is the whole list**, and what left it is the point: an
+authenticated GitHub CLI (the deprecated deployer fetched the chat plugin with
+`gh`, so installing this agent meant having a GitHub account), a
+model-provider device-code sign-in, a clone of the deployer, a registry row
+tying one checkout to one instance, and an `activate` step that minted a
+credential, DM'd the owner, bound the agent permanently to whichever handset
+answered, and could never be repeated. Nine steps, three interactive, one
+irreversible — against three commands and a build.
+
+Every one of those was a place an install could stop, and none of them was
+about this agent.
 
 ```sh
 git clone https://github.com/rauppvj/cfo-hermes-agent.git
