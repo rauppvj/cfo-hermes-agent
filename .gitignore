@@ -6,3 +6,8 @@ __pycache__/
 *.db-wal
 *.db-shm
 .env
+
+# Written by the running container through the mounts in compose.yml.
+panel/
+# The credential `plow-agents mint` writes. One install, one token, never committed.
+plow-credentials

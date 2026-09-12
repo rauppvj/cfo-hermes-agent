@@ -89,6 +89,27 @@ def db_path() -> Path:
     return data_dir() / "ledger.db"
 
 
+def export_dir() -> Path:
+    """Where a CSV the owner asked for is written: $CFO_EXPORT, else beside
+    the ledger.
+
+    It has to be overridable, and the reason is a silent delivery failure.
+    Hermes refuses to attach a model-emitted `MEDIA:` path that resolves under
+    its denylist -- /etc /proc /sys /dev /root /boot /var/log /var/lib
+    /var/run -- and the current boot contract puts the whole agent home at
+    /var/lib/hermes. So a CSV written beside the ledger, which is where it
+    belongs, is dropped on the way out with one line in a gateway log: the
+    owner asks for their spending, the agent reports the file sent, and nothing
+    arrives. The image sets CFO_EXPORT to a directory outside that denylist.
+
+    The default is unchanged for an instance on the older contract, where
+    /opt/data is nowhere near the denylist and the file delivers from beside
+    the ledger.
+    """
+    override = os.environ.get("CFO_EXPORT")
+    return Path(override).expanduser() if override else data_dir() / "export"
+
+
 # --------------------------------------------------------------------------
 # money: integer cents in, formatted strings out
 # --------------------------------------------------------------------------
@@ -1547,7 +1568,7 @@ def week(con, today=None) -> dict:
 # --------------------------------------------------------------------------
 
 def export_csv(con, month: str | None = None) -> dict:
-    """One month -- or everything -- as CSV under $CFO_DATA/export.
+    """One month -- or everything -- as CSV under $CFO_EXPORT.
 
     The ledger is the owner's. A file they can open in a spreadsheet is the
     proof, and the way out if they ever leave: nothing here is locked in.
@@ -1559,7 +1580,7 @@ def export_csv(con, month: str | None = None) -> dict:
     rows = con.execute(
         f"SELECT id, day_local, kind, method, category, amount_cents, note, source"
         f" FROM tx {where} ORDER BY day_local, id", params).fetchall()
-    target = data_dir() / "export" / f"{month or 'all'}.csv"
+    target = export_dir() / f"{month or 'all'}.csv"
     target.parent.mkdir(parents=True, exist_ok=True)
     cur = currency_of(con)
     with target.open("w", newline="", encoding="utf-8") as fh:

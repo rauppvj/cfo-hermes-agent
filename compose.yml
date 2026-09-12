@@ -1,0 +1,69 @@
+# How cfo runs on your own machine.
+#
+#   plow-agents mint <line-id>      writes ./plow-credentials
+#   docker compose up --build -d    boots this
+#
+# Nothing else. No ports: the agent dials out to Plow, and nothing dials in.
+
+# Pinned, rather than taken from this directory's name, so every command in
+# every doc here names the same container and the same volume however the
+# checkout was cloned -- `cfo-agent-1` and `cfo_agent-home`, not
+# `cfo-hermes-agent-main-agent-1`.
+name: cfo
+
+services:
+  agent:
+    build: .
+    environment:
+      # WHICH agent this is on the Agent Index -- the one thing the credential
+      # cannot say. The reporter stands down without it rather than guessing a
+      # name, so an install that reports nothing is usually this line missing.
+      #
+      # Leave it as `cfo` and this install's usage joins the published agent's
+      # page, which is the point: one agent, many installs. Change it only to
+      # publish a fork of your own under a different id.
+      AGENT_ID: cfo
+    volumes:
+      # `.host`, not the path the agent reads. A bind carries this machine's
+      # ownership into the container and the credential gate refuses anything
+      # but root-owned 0600, so the image copies it into place as root itself
+      # at cont-init. Read-only here: a rotation rewrites this file from
+      # outside, and nothing inside has a reason to touch it.
+      - ./plow-credentials:/var/lib/plow/credentials.host:ro
+
+      # The agent's home: sessions, the ledger, the crons it registered, the
+      # index install id. A NAMED volume, and reused by name on every
+      # recreate -- an anonymous one is a fresh home per `up`, which loses the
+      # ledger and re-registers this install on the index as a second one.
+      #
+      # `docker compose down` keeps it. `docker compose down -v` deletes the
+      # owner's ledger with it, so the README says that once, loudly.
+      - agent-home:/var/lib/hermes
+
+      # The wall panel, on your own disk, so you can open it by double click:
+      #   open panel/index.html
+      # It is redrawn from the ledger every ten minutes and on every write. A
+      # host directory rather than the volume because the point of the panel is
+      # that a person looks at it -- one inside a Docker volume is a page
+      # nobody can reach. Created empty on first `up` if it is not there.
+      - ./panel:/srv/cfo/panel
+
+      # Only the optional push channel writes here (docs/AUTOPILOT.md): a
+      # launchd watcher on this Mac drops the bank's notifications in, and the
+      # agent reads them every five minutes. Mounted either way, because a
+      # mount whose source is missing is created as a directory rather than
+      # failing, and an empty one costs a stat every five minutes.
+      #
+      # Under $HOME and NOT in the checkout, which is the one detail that
+      # makes this channel work at all: launchd runs without the
+      # Files-and-Folders grants a terminal has, so a watcher writing into a
+      # repo that happens to sit in ~/Desktop or ~/Documents cannot even open
+      # its own inbox, and says so once a minute into a log nobody reads.
+      - ${HOME}/.cfo/inbox:/srv/cfo/inbox
+    # The agent checkpoints its session on SIGTERM and its supervisor allows
+    # 30s for that; Docker's default 10s cuts it off and orphans the
+    # transcript lease, which the next boot then has to break.
+    stop_grace_period: 35s
+
+volumes:
+  agent-home:

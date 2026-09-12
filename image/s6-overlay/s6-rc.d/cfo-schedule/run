@@ -1,0 +1,31 @@
+#!/bin/sh
+# Keep this install's two cron rows registered. See /opt/plow/cfo-schedule.py.
+#
+# A longrun rather than a oneshot, and the difference is the whole point: the
+# rows deliver to the chat plow-init resolves at boot, so the first pass can
+# legitimately be too early, and a home volume that outlives a rebuild can
+# lose them at any time. A oneshot that failed once would leave the agent with
+# no brief until somebody noticed. This tries every five minutes and says so
+# only when it changes something.
+PATH=/command:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+export PATH
+
+HERMES_HOME=/var/lib/hermes
+export HERMES_HOME
+
+# As the agent's uid, not as root, and that is not tidiness. `hermes cron
+# create` rewrites $HERMES_HOME/cron/jobs.json by atomic replace: run as root
+# it leaves the file root-owned 0600, and the scheduler -- which is the
+# gateway, running as hermes -- then fails every tick reading its own
+# schedule. Upstream logged 14 hours of that before anyone saw it.
+#
+# The staging half of the script writes root-owned files into the home's
+# scripts/ directory on purpose, so it runs as root; the registration half
+# must not. So: root stages, then this drops for the create.
+/opt/hermes/.venv/bin/python3 /opt/plow/cfo-schedule.py --stage-only 2>&1
+while :; do
+  /command/s6-setuidgid hermes \
+    env HOME="$HERMES_HOME" HERMES_HOME="$HERMES_HOME" \
+    /opt/hermes/.venv/bin/python3 /opt/plow/cfo-schedule.py --register-only 2>&1
+  /bin/sleep 300
+done

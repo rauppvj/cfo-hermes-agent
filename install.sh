@@ -1,283 +1,241 @@
 #!/usr/bin/env bash
-# Install this agent, end to end, from a fresh checkout.
+# Install cfo on this machine, end to end.
 #
-# What it replaces is a ten-command sequence where every step is a place to
-# stop: install agent-mgr, register, deploy, activate, up, cron-sync, sign-in,
-# set-latch, check-latch -- in that order, with two of them interactive and one
-# of them (activate) a ONE-TIME SPEND that must never run twice.
+# What this is, and why it is short now. Until 2026-09-12 this file drove the
+# deprecated deployer: clone agent-mgr, register this checkout, deploy,
+# activate (a one-time spend that binds a handset and must never run twice),
+# up, cron-sync, sign in to a model provider, offer Latch, check. Nine steps,
+# three of them interactive, one irreversible -- and a hard prerequisite on the
+# GitHub CLI, signed in, because the deployer fetched the chat plugin with it.
+# The Agent Index measured what that cost: one install in three completed.
 #
-# The rules this script follows, because they are what makes an installer
-# safe to re-run:
+# The current contract is three commands, and this file is a careful wrapper
+# around them:
 #
-#   * Every step checks whether it is already done, and says so instead of
-#     doing it again. Re-running this file after a failure resumes; it does
-#     not start over.
-#   * `activate` is guarded hardest. It mints a credential, sends a DM, and
-#     binds the agent permanently to the handset that texts the code. If the
-#     home already carries PLOW_HOME_CHANNEL, it is skipped, loudly.
-#   * Nothing is done silently on the owner's behalf that costs money, sends
-#     a message, or writes a credential without saying so first.
+#     plow-agents login          once per Plow account
+#     plow-agents mint <line>    once per agent -- writes ./plow-credentials
+#     docker compose up --build  boots it
 #
-# Usage:  ./install.sh [name]        (default name: cfo)
+# No GitHub account. No deployer. No registry. No model sign-in: inference
+# comes with the Plow credential. The rules this file follows are the ones
+# that make an installer safe to re-run:
+#
+#   * Every step checks whether it is already done and says so instead of
+#     doing it again. Re-running after a failure resumes; it does not start
+#     over.
+#   * Nothing that changes the Plow account happens without a y/N -- minting a
+#     credential, and asking Plow for a new line, are both real and both cost
+#     something.
+#   * It ends by checking its own work, because every failure this install can
+#     have is silent.
+#
+# Usage:  ./install.sh
 set -euo pipefail
 
-NAME="${1:-cfo}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MGR_DIR="${AGENT_MGR_DIR:-$HOME/services/agent-mgr}"
-BIN_DIR="${AGENT_MGR_BIN:-$HOME/.local/bin}"
+PLOW_AGENTS_DIR="${PLOW_AGENTS_DIR:-$HOME/.local/share/plow-agents}"
+CREDENTIAL="$REPO/plow-credentials"
+TOKEN="${XDG_CONFIG_HOME:-$HOME/.config}/plow/token"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$*"; }
 skip() { printf '    \033[2m·\033[0m %s\n' "$*"; }
 die()  { printf '\n\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+need_tty() { [ -t 0 ] || die "$1 needs a terminal: re-run ./install.sh from one"; }
 
 # --------------------------------------------------------------------------
 # 0. What has to be true before anything is written
 # --------------------------------------------------------------------------
 step "Checking what this machine already has"
 
-# Demanded only by the steps that actually stop and ask -- activation, the
-# model sign-in, the Latch offer. A re-run with all three already done needs
-# no terminal at all, which is what makes this safe to put in a provisioning
-# script once the interactive part is behind you.
-need_tty() { [ -t 0 ] || die "$1 needs a terminal: re-run ./install.sh $NAME from one"; }
-
 command -v docker >/dev/null || die "docker is not installed -- https://docker.com/get-started"
 docker info >/dev/null 2>&1  || die "docker is installed but not running -- start Docker Desktop and re-run"
 ok "docker"
 
-command -v git    >/dev/null || die "git is not installed"
-command -v python3 >/dev/null || die "python3 is not installed"
-python3 - <<'PY' || die "python3 is older than 3.11 -- the ledger engine needs it"
-import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)
-PY
-ok "python3 $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+docker compose version >/dev/null 2>&1 \
+    || die "this docker has no 'compose' subcommand -- update Docker Desktop (Compose v2+)"
+ok "docker compose"
 
-command -v gh >/dev/null || die "the GitHub CLI is not installed -- https://cli.github.com (agent-mgr fetches the Plow Chat plugin with it)"
-gh auth status >/dev/null 2>&1 || die "gh is installed but not signed in -- run 'gh auth login' and re-run this"
-ok "gh, authenticated"
+command -v git >/dev/null || die "git is not installed -- xcode-select --install"
+command -v python3 >/dev/null || die "python3 is not installed -- brew install python@3.12"
+ok "git, python3"
+
+# Docker Desktop must come up at login, or the agent is simply off: the
+# container restarts itself, but not while the daemon is down. An agent that
+# is off answers nothing and reports nothing, and this cost this repo four
+# days of a public leaderboard reading zero.
+printf '    turn on Docker Desktop → Settings → General → "Start Docker Desktop when you sign in"\n'
 
 # --------------------------------------------------------------------------
-# 1. agent-mgr -- the deployer, which lives outside this repo
+# 1. plow-agents -- the credential CLI, which lives outside this repo
 # --------------------------------------------------------------------------
-step "agent-mgr"
+step "plow-agents"
 
-if [ ! -d "$MGR_DIR/.git" ]; then
-    git clone --quiet https://github.com/plow-pbc/agent-mgr.git "$MGR_DIR"
-    ok "cloned to $MGR_DIR"
+if [ -d "$PLOW_AGENTS_DIR/.git" ]; then
+    skip "already at $PLOW_AGENTS_DIR"
 else
-    skip "already at $MGR_DIR"
+    git clone --quiet https://github.com/plow-pbc/plow-agents.git "$PLOW_AGENTS_DIR"
+    ok "cloned to $PLOW_AGENTS_DIR"
 fi
-
-mkdir -p "$BIN_DIR"
-ln -sf "$MGR_DIR/agent-mgr" "$BIN_DIR/agent-mgr"
-export PATH="$BIN_DIR:$PATH"
-command -v agent-mgr >/dev/null || die "agent-mgr is not on PATH even after linking it into $BIN_DIR"
-ok "agent-mgr on PATH"
-
-case ":$PATH:" in
-    *":$BIN_DIR:"*) ;;
-    *) printf '    add %s to your PATH to use agent-mgr later\n' "$BIN_DIR" ;;
-esac
+PLOW_AGENTS="$PLOW_AGENTS_DIR/bin/plow-agents"
+[ -x "$PLOW_AGENTS" ] || die "$PLOW_AGENTS is missing or not executable"
+ok "$($PLOW_AGENTS --help >/dev/null 2>&1 && echo "plow-agents runs")"
 
 # --------------------------------------------------------------------------
-# 2. Register and deploy -- both safe to have run before
+# 2. The Plow account -- once per person, not once per agent
 # --------------------------------------------------------------------------
-step "Registering $NAME"
+step "Your Plow account"
 
-registered_repo="$(agent-mgr --json ls 2>/dev/null \
-    | python3 -c "
-import json, sys
-rows = json.load(sys.stdin)['result']['agents']
-print(next((r['repo'] for r in rows if r['name'] == '$NAME'), ''))
-" 2>/dev/null || true)"
-
-if [ -z "$registered_repo" ]; then
-    agent-mgr register "$NAME" "$REPO"
-    ok "registered $NAME -> $REPO"
-elif [ "$registered_repo" != "$REPO" ]; then
-    die "$NAME is already registered against $registered_repo, not this checkout.
-       Run this from that checkout, or pick another name: ./install.sh mycfo"
+if [ -s "$TOKEN" ]; then
+    skip "already logged in ($TOKEN)"
 else
-    skip "already registered"
-fi
-
-RESOLVED="$(agent-mgr --json resolve "$NAME")"
-resolved_field() { printf '%s' "$RESOLVED" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['$1'])"; }
-HOME_DIR="$(resolved_field home)"
-CONTAINER="$(resolved_field container)"
-DOTENV="$HOME_DIR/.env"
-
-step "Deploying"
-AGENT_TRANSITION_ACK=1 agent-mgr deploy "$NAME"
-ok "config, plugin, skills and the brief gate are in $HOME_DIR"
-
-# --------------------------------------------------------------------------
-# 3. Activation -- the one step that cannot be undone
-# --------------------------------------------------------------------------
-step "Claiming the agent from your phone"
-
-dotenv_value() { [ -f "$DOTENV" ] && sed -n "s/^$1=//p" "$DOTENV" | tail -1 || true; }
-
-if [ -n "$(dotenv_value PLOW_HOME_CHANNEL)" ]; then
-    skip "already activated -- not re-running it (a second activation mints another credential and DMs you again)"
-else
-    need_tty "claiming the agent"
+    need_tty "logging in to Plow"
     cat <<'TXT'
-    This prints a code. Text it from the phone that should OWN this agent --
-    that handset becomes the owner permanently, and the activation is a
-    one-time spend. Use the right phone.
+    This prints a phrase to text from the phone on your Plow account. It logs
+    THIS MACHINE in; it does not create an agent and does not bind a handset
+    to one.
 
 TXT
-    read -r -p "    Ready? [y/N] " answer
-    case "$answer" in
-        [yY]*) agent-mgr activate "$NAME" ;;
-        *) die "stopped before activating. Re-run this script when you are ready -- everything above is already done." ;;
-    esac
-    [ -n "$(dotenv_value PLOW_HOME_CHANNEL)" ] || die "activation did not write a home channel -- read the error above; do NOT re-run activate blindly"
-    ok "activated"
+    "$PLOW_AGENTS" login
+    [ -s "$TOKEN" ] || die "login did not write $TOKEN -- read the error above"
+    ok "logged in"
 fi
 
 # --------------------------------------------------------------------------
-# 4. Start it, and give it a schedule and a model credential
+# 3. The line the agent answers on
 # --------------------------------------------------------------------------
-step "Starting the container"
-AGENT_TRANSITION_ACK=1 agent-mgr up "$NAME"
-ok "running"
+step "The line cfo will answer on"
 
-step "Registering the brief and the panel"
-agent-mgr cron-sync "$NAME"
-ok "hourly tick; the gate opens it at your own 08:00 and 22:00"
-ok "the panel redraws every ten minutes, without waking the model"
-
-# Render it once now, so there is something to open before the first message
-# -- but only over a ledger that exists. On a fresh install the container has
-# not created one yet, and making it here from the host is how two processes
-# end up disagreeing about who owns the file.
-PANEL="$HOME_DIR/cfo/panel/index.html"
-if [ -f "$HOME_DIR/cfo/ledger.db" ]; then
-    CFO_DATA="$HOME_DIR/cfo" python3 "$REPO/cfo-shared/scripts/panel.py" 2>/dev/null \
-        && ok "panel at $PANEL"
+if [ -f "$CREDENTIAL" ]; then
+    skip "a credential is already at $CREDENTIAL -- not minting a second one"
+    skip "(to move this agent to another line: plow-agents revoke, then re-run)"
 else
-    skip "panel appears at $PANEL after your first message"
-fi
-
-step "Signing in to the model provider"
-if [ -s "$HOME_DIR/auth.json" ]; then
-    skip "a credential is already in $HOME_DIR/auth.json"
-else
-    need_tty "signing in to the model provider"
-    echo "    A device code follows. Open the URL, enter the code, come back."
-    agent-mgr sign-in "$NAME"
-    ok "signed in"
-fi
-
-# --------------------------------------------------------------------------
-# 4b. Counting this install on the Agent Index
-# --------------------------------------------------------------------------
-#
-# There is nothing to sign in to. Identity is this container's own Plow token,
-# which the index resolves by asking Plow -- so the scheduled job just works,
-# and the only thing left to do here is SAY SO, because reporting that starts
-# without being announced is reporting nobody agreed to.
-#
-# (Until 2026-09-03 this step ran a GitHub device flow. Upstream replaced it
-# mid-hackathon and the index stopped accepting the keys it minted the same
-# day. A step that asks for a credential nothing accepts is worse than no
-# step, so it is gone rather than left to fail politely.)
-step "Reporting usage to the Agent Index"
-
-cat <<TXT
-    This agent is published on the AI Worth Using Agent Index, and installs are
-    counted there. The hourly job reports HOW MUCH it ran -- token counts per
-    day, per model. It does NOT send your ledger, your transactions, your
-    prompts, or anything you text the agent.
-
-    The client is one readable file:
-        $HOME_DIR/scripts/agent_index_client.py
-
-    To turn it off, now or later -- the agent works exactly the same either way:
-        docker exec $CONTAINER sh -c 'python3 "\$HERMES_HOME"/skills/cfo-shared/scripts/money.py \\
-            config usage_reporting off'
-
-TXT
-ok "hourly, from this container's own Plow token -- no account, no sign-in"
-
-# --------------------------------------------------------------------------
-# 5. Latch -- optional, and asked for last on purpose
-# --------------------------------------------------------------------------
-step "Plow Latch (optional)"
-
-if [ -n "$(dotenv_value DOMO_DEVICE_UID)" ]; then
-    skip "already configured"
-    agent-mgr check-latch "$NAME" || true
-else
-    cat <<'TXT'
-    Latch lets the agent reach your Mac -- it can then pick a statement out
-    of your Downloads itself. You do not need it: you can send the file in
-    the chat and it reads it the same way.
-
-    Skip this now and add it any time with:
-        agent-mgr set-latch <name> && agent-mgr deploy <name>
-
-TXT
-    if [ ! -t 0 ]; then
-        skip "no terminal -- skipping the Latch offer; add it later with 'agent-mgr set-latch $NAME'"
-        answer=n
-    else
-        read -r -p "    Set up Latch now? [y/N] " answer
+    if [ -d "$CREDENTIAL" ]; then
+        die "$CREDENTIAL is a DIRECTORY, which means 'docker compose up' ran before
+       the credential existed and Docker created the mount target. Fix it:
+           docker compose down -v && rmdir '$CREDENTIAL'
+       then re-run this script."
     fi
+    LINES="$("$PLOW_AGENTS" lines 2>&1 || true)"
+    printf '%s\n' "$LINES" | sed 's/^/    /'
+    FREE="$(printf '%s\n' "$LINES" | awk -F'\t' '$4 == "free" {print $1}')"
+    if [ -z "$FREE" ]; then
+        need_tty "asking Plow for a line"
+        cat <<'TXT'
+
+    No free line on this account: every line you have already answers as some
+    agent, and two agents on one line both reply to the same chat.
+
+    Plow can give this account another assistant line and a chat on it. That
+    is a real change to your account and nothing here can undo it.
+
+TXT
+        read -r -p "    Ask Plow for a new line now? [y/N] " answer
+        case "$answer" in
+            [yY]*) "$PLOW_AGENTS" login --new-line ;;
+            *) die "stopped. Free a line (plow-agents revoke <line>) or re-run and say yes." ;;
+        esac
+        LINES="$("$PLOW_AGENTS" lines 2>&1 || true)"
+        FREE="$(printf '%s\n' "$LINES" | awk -F'\t' '$4 == "free" {print $1}')"
+        [ -n "$FREE" ] || die "still no free line -- 'plow-agents lines' says what this account has"
+    fi
+    COUNT="$(printf '%s\n' "$FREE" | wc -l | tr -d ' ')"
+    if [ "$COUNT" = 1 ]; then
+        LINE="$FREE"
+    else
+        need_tty "choosing a line"
+        printf '\n    More than one free line:\n'
+        printf '%s\n' "$FREE" | sed 's/^/      /'
+        read -r -p "    Which line should cfo answer on? " LINE
+        printf '%s\n' "$FREE" | grep -qx "$LINE" || die "$LINE is not one of the free lines above"
+    fi
+    NUMBER="$(printf '%s\n' "$LINES" | awk -F'\t' -v l="$LINE" '$1 == l {print $3}')"
+    need_tty "minting this agent's credential"
+    printf '\n    cfo will answer on %s (%s).\n' "$LINE" "${NUMBER:-number unknown}"
+    printf '    Minting creates the agent in Plow and writes its credential to\n'
+    printf '    %s. Keep that file: it is this agent, and it is not in git.\n\n' "$CREDENTIAL"
+    read -r -p "    Mint it? [y/N] " answer
     case "$answer" in
-        [yY]*)
-            agent-mgr set-latch "$NAME"
-            AGENT_TRANSITION_ACK=1 agent-mgr deploy "$NAME"
-            agent-mgr check-latch "$NAME"
-            ok "latch reachable"
-            ;;
-        *) skip "skipped -- send statements as chat attachments instead" ;;
+        [yY]*) (cd "$REPO" && "$PLOW_AGENTS" mint "$LINE") ;;
+        *) die "stopped before minting. Nothing was created; re-run when you are ready." ;;
     esac
+    [ -s "$CREDENTIAL" ] || die "mint did not write $CREDENTIAL -- read the error above"
+    ok "credential written"
 fi
 
 # --------------------------------------------------------------------------
-# 6. Is it this agent? Every failure this install can have is silent
+# 4. Build and start
+# --------------------------------------------------------------------------
+step "Building and starting the agent"
+printf '    The first build pulls a ~500MB base image; give it a few minutes.\n'
+(cd "$REPO" && docker compose up --build -d)
+ok "container up"
+
+# --------------------------------------------------------------------------
+# 5. Did it come up as THIS agent?
+# --------------------------------------------------------------------------
+# plow-init asks Plow who holds this credential and refuses to start anything
+# on an answer it does not understand -- it parks, with the reason, rather
+# than booting as whoever the home volume belonged to last. So the boot has
+# exactly two outcomes and both are legible.
+step "Waiting for it to say who it is"
+deadline=$(( $(date +%s) + 180 ))
+configured=""
+while [ "$(date +%s)" -lt "$deadline" ]; do
+    logs="$(cd "$REPO" && docker compose logs agent 2>/dev/null || true)"
+    if printf '%s' "$logs" | grep -q 'plow-init: configured'; then
+        configured="$(printf '%s' "$logs" | grep -m1 'plow-init: configured')"
+        break
+    fi
+    if printf '%s' "$logs" | grep -q 'plow-init: .*park\|PARKED'; then
+        printf '%s\n' "$logs" | grep -i 'park' | tail -3 | sed 's/^/    /'
+        die "the agent parked instead of starting -- the line above says why.
+       Nothing else in the container runs until that is fixed."
+    fi
+    sleep 5
+done
+if [ -n "$configured" ]; then
+    ok "$(printf '%s' "$configured" | tail -c 120)"
+else
+    printf '    still starting after 3 minutes. Follow it with:\n'
+    printf '        docker compose logs -f agent\n'
+fi
+
+# --------------------------------------------------------------------------
+# 6. Every failure this install can have is silent
 # --------------------------------------------------------------------------
 step "Checking the install"
-docker exec "$CONTAINER" sh -c \
-    'python3 "$HERMES_HOME"/skills/cfo-shared/scripts/doctor.py' || true
+(cd "$REPO" && docker compose exec -T agent \
+    /opt/hermes/.venv/bin/python3 \
+    /var/lib/hermes/skills/cfo-shared/scripts/doctor.py) || true
 
-# --------------------------------------------------------------------------
-# Done
-# --------------------------------------------------------------------------
 cat <<TXT
 
-$(bold "Installed.") Text your agent from the phone you activated with:
+$(bold "Installed.") Text the number above from the phone on your Plow account:
 
-    "hi"                          it will offer to set you up in 30 seconds
-    "spent 40 on lunch"           or just start logging and set up later
+    "hi"                          it will set you up in two questions
+    "spent 40 on lunch"           or just start logging
     "can I afford a monitor?"     what a purchase does to the month
 
 It replies in whatever language you write to it in.
 
-It will ask what city you are in. That answer sets the timezone for
-everything, including the hour your brief arrives -- 08:00 and 22:00 where
-you live, wherever that is.
-
 The same month is also a page on this Mac, redrawn on every change:
 
-    open $HOME_DIR/cfo/panel/index.html
+    open $REPO/panel/index.html
 
 Put it full-screen on a spare monitor or an old tablet and it stays current
 on its own.
 
-To stop typing purchases -- card taps, the bank's SMS, the bank's push
-notifications through this Mac -- see docs/AUTOPILOT.md, and for the push
-channel run:  scripts/install-notify.sh $NAME
+To stop typing purchases at all -- card taps, the bank's own notifications --
+see docs/AUTOPILOT.md.
 
-    agent-mgr logs $NAME          follow it
-    agent-mgr restart $NAME       after changing anything in this checkout
+    docker compose logs -f agent     follow it
+    docker compose up --build -d     after changing anything in this checkout
+    docker compose down              stop it, keeping the ledger
 
 Any time something looks off, the check above is one command:
 
-    docker exec $CONTAINER sh -c 'python3 "\$HERMES_HOME"/skills/cfo-shared/scripts/doctor.py'
+    docker compose exec agent /opt/hermes/.venv/bin/python3 \\
+        /var/lib/hermes/skills/cfo-shared/scripts/doctor.py
 TXT

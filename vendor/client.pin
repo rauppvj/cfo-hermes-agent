@@ -1,0 +1,18 @@
+# The agent-index usage client, pinned.
+#
+# Not committed: plow-pbc/agent-index-client owns that file, and a copy here
+# would drift from it. The image build fetches exactly this revision and
+# refuses anything else -- a sha, never `main`, because this file runs inside a
+# container holding a live Plow credential and a moving reference substitutes
+# unreviewed code under it. The checksum is the second half: a sha in a URL is
+# only as good as the host serving it.
+#
+# Why THIS sha and not the one the reference agent pins (f900ff1): #11
+# "join on 409" is in this one and not in that one. Registering an agent id
+# somebody else published answers 409, and before #11 the client EXITED there
+# -- so every install but the publisher's own minted no key and reported no
+# usage, forever, on the one number this hackathon is ranked by. The install
+# looked perfect: container up, agent answering, leaderboard flat.
+sha=87901f8b182a8a7c65ee3dd7267f8f835ee2a545
+sha256=c3bf54ed37aec22704b8003a7ff6385a1fd3ef49207ce55613ddc41df36a1b01
+path=standalone/agent_index_client.py

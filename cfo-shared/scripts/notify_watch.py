@@ -15,7 +15,7 @@ This script reads that database every minute (launchd; see
 scripts/install-notify.sh), keeps the notifications that carry an amount,
 and appends them as JSON lines to
 
-    ~/.hermes-<name>/inbox/notifications.jsonl
+    ~/.cfo/inbox/notifications.jsonl   (mounted into the container)
 
 -- inside the instance's home, which is bind-mounted into the container,
 where notify_gate.py picks them up. Nothing here talks to the network,
@@ -96,10 +96,18 @@ def delivered_iso(cocoa_seconds) -> str:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def scan(db: Path, home: Path, backfill: int = 0) -> dict:
-    """Read new records, append the money-shaped ones to the inbox, advance."""
+def scan(db: Path, home: Path, backfill: int = 0, inbox_dir: Path | None = None) -> dict:
+    """Read new records, append the money-shaped ones to the inbox, advance.
+
+    `inbox_dir` is where the CONTAINER can see this file, which stopped being
+    the same place as `home` when the agent's home became a Docker volume: the
+    Mac writes into a directory compose.yml mounts, and nothing else about the
+    old home exists any more. `home` still holds this watcher's own cursor,
+    which nothing but this watcher reads.
+    """
     state_file = home / "cfo" / "notify_watch.json"
-    inbox = home / "inbox" / "notifications.jsonl"
+    inbox = (inbox_dir / "notifications.jsonl" if inbox_dir
+             else home / "inbox" / "notifications.jsonl")
     try:
         state = json.loads(state_file.read_text())
     except (FileNotFoundError, ValueError):
@@ -159,8 +167,15 @@ def dump(db: Path, n: int) -> int:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         prog="notify_watch", description="forward bank notifications to the agent's inbox")
-    p.add_argument("--home", default=str(Path.home() / ".hermes-cfo"),
-                   help="the instance's home on this Mac (default ~/.hermes-cfo)")
+    p.add_argument("--home", default=str(Path.home() / ".cfo"),
+                   help="where this watcher keeps its own cursor and logs "
+                        "(default ~/.cfo). NEVER under ~/Desktop or "
+                        "~/Documents: launchd runs without the "
+                        "Files-and-Folders grants a terminal has, and cannot "
+                        "even open a file there")
+    p.add_argument("--inbox", default=None,
+                   help="the directory the CONTAINER reads, as mounted in "
+                        "compose.yml (default: <home>/inbox)")
     p.add_argument("--db", default=str(DB))
     p.add_argument("--backfill", type=int, default=0,
                    help="on first run, also read this many of the newest notifications")
@@ -171,6 +186,7 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
 
     db, home = Path(args.db), Path(args.home).expanduser()
+    inbox_dir = Path(args.inbox).expanduser() if args.inbox else None
     try:
         if args.check:
             con = open_db(db)
@@ -180,7 +196,7 @@ def main(argv=None) -> int:
             return 0
         if args.dump is not None:
             return dump(db, args.dump)
-        result = scan(db, home, args.backfill)
+        result = scan(db, home, args.backfill, inbox_dir)
         if result["kept"]:
             print(f"{datetime.now().isoformat(timespec='seconds')} forwarded "
                   f"{result['kept']} of {result['seen']} new notifications")

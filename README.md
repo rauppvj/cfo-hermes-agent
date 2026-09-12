@@ -8,11 +8,12 @@ own machine.
 
 A [Hermes](https://howto.plow.co/hermes) agent, texted through
 [Plow Chat](https://plow.co) and installed with one command. Optionally drives
-your own Mac through [Plow Latch](https://plow.co/latch). Deployed with
-[`plow-pbc/agent-mgr`](https://github.com/plow-pbc/agent-mgr) — which carries a
-deprecation notice in favour of
-[`plow-agents`](https://github.com/plow-pbc/plow-agents) and still owns
-container lifecycle, so it is what `install.sh` uses and what it should use.
+your own Mac through [Plow Latch](https://plow.co/latch). This repo **is** the
+image: it builds `FROM` the
+[Plow base](https://github.com/plow-pbc/plow-hermes-agent) and boots with a
+credential from
+[`plow-agents`](https://github.com/plow-pbc/plow-agents) — `mint`, then
+`docker compose up`. No deployer, no GitHub account, no registry.
 
 ```
 you   spent 40 on lunch
@@ -52,10 +53,9 @@ cfo   Anotado: R$ 40,00 em alimentação. Você está em R$ 512,00 esse mês.
 
 > [!IMPORTANT]
 > **This repo is code only.** Nothing under this tree may carry a credential,
-> a chat id, or anybody's transactions. The ledger is a SQLite file in the
-> instance's own home on the host (`~/.hermes-<name>`, mounted into the
-> container at `$HERMES_HOME`), written by the owner's instance and by nothing
-> else. There is no server, no account, and no sign-up: your spending is not
+> a chat id, or anybody's transactions. The ledger is a SQLite file in this
+> instance's own Docker volume (`/var/lib/hermes/cfo/ledger.db`), written by
+> the owner's instance and by nothing else. There is no server, no account, and no sign-up: your spending is not
 > sent anywhere to be stored. The language model still sees what you text it,
 > the way any agent does — that is the honest boundary, and it is worth knowing
 > which side of it your data is on.
@@ -175,9 +175,10 @@ untouched.
 ## The panel: the second surface
 
 The chat answers when you ask it something. A screen you walk past answers
-before you ask — so the same ledger also renders as one page:
+before you ask — so the same ledger also renders as one page, on your own
+disk, in the checkout you installed from:
 
-    ~/.hermes-cfo/cfo/panel/index.html
+    open panel/index.html
 
 Open it by double click, put it full-screen on a spare monitor or an old
 iPad, and it shows the month's spend, where it closes at the current pace,
@@ -206,10 +207,16 @@ python3 cfo-shared/scripts/panel.py --json     # the same figures, as data
 CFO_PANEL=~/Desktop/cfo.html python3 cfo-shared/scripts/panel.py
 ```
 
-A `cfo-panel` cron row keeps it current when nobody is texting: `no_agent`,
-so the scheduler runs the script and never wakes the model — no tokens, no
-message, ten minutes apart. That tick is not redundant with the write hook:
-at midnight "today" becomes a different day on a page nobody has touched.
+The [`cfo-panel`](image/s6-overlay/s6-rc.d/cfo-panel/run) service keeps it
+current when nobody is texting — ten minutes apart, no model, no tokens, no
+message. That tick is not redundant with the write hook: at midnight "today"
+becomes a different day on a page nobody has touched.
+
+**It writes to a directory mounted from your Mac** (`./panel`), and that is
+not a detail. The home is a Docker volume, so a page written beside the ledger
+would be redrawn every ten minutes somewhere nobody can open it — the one
+failure that looks perfectly healthy from inside the container. `doctor.py`
+checks the mount, not just the file.
 
 The language follows `money.py config language pt|en`, which the agent stores
 from your first message; without that setting it follows the currency.
@@ -221,8 +228,11 @@ This agent is published on the [Agent Index](https://aiworthusing.com/agent-inde
 as `cfo`, and each install reports **how much it ran** — token counts per day
 per model, through
 [`plow-pbc/agent-index-client`](https://github.com/plow-pbc/agent-index-client),
-one file of standard-library Python that lands in your own home at
-`~/.hermes-<name>/scripts/agent_index_client.py`.
+one file of standard-library Python, fetched at build time from the commit
+[`vendor/client.pin`](vendor/client.pin) names and refused unless its checksum
+matches. It lives at `/opt/plow/agent-index-client.py`, root-owned and outside
+every home: what a supervisor runs unattended must not be a file a turn can
+rewrite.
 
 **What it does not send: anything else.** No prompts, no messages, no
 transactions, no totals, no file paths, no costs. Your ledger is not part of
@@ -231,57 +241,67 @@ it and never leaves the machine.
 **There is nothing to sign in to.** Identity starts as this container's own
 Plow token: registering trades it, via Plow, for an Index key this install
 keeps, and every report after that carries the key alone. No second account,
-no device flow. Turn it off whenever you like — the agent works exactly the
-same:
-
-```sh
-docker exec hermes-cfo sh -c 'python3 "$HERMES_HOME"/skills/cfo-shared/scripts/money.py \
-    config usage_reporting off'
-```
+no device flow. To turn it off, build an image without the reporter — comment `agent-index`
+out of `image/s6-overlay/s6-rc.d/user/contents.d/` and rebuild. There is no
+runtime switch, on purpose: a flag would be a second place that can disagree
+with the image about whether this install reports, and the Dockerfile has
+already answered the question.
 
 Reporting starts at the **first run**: the client records a baseline and sends
 the difference from then on, so nothing before it is counted — by design, so a
 long-lived session cannot dump weeks of history onto one day.
 
 <details>
-<summary>How it is wired, and the three things that decide whether it works</summary>
+<summary>How it is wired, and the four things that decide whether it works</summary>
 
-An hourly `cfo-usage` cron row runs
-[`usage_report.sh`](cfo-shared/scripts/usage_report.sh) with `no_agent` — the
-script is the job, so no model wakes up and nothing is delivered to the chat.
-Its output goes to `~/.hermes-<name>/logs/agent-index.log`, which is the only
-place a `deliver: local` job leaves a trace you can read.
+The [`agent-index`](image/s6-overlay/s6-rc.d/agent-index/run) service, every
+five minutes, beside the gateway. Not a cron row: a cron row lives in
+`$HERMES_HOME/cron/jobs.json`, which nothing replays after a rebuild, so an
+install could stop reporting on a machine where everything else was fine.
+Supervised, its account of itself is the container's own log
+(`docker compose logs agent | grep agent-index`).
 
-- **the Index key** at `~/.hermes-<name>/.agent-index/token` — the only
-  credential a **report** needs, minted once by `--register` and living in the
-  bind mount so a deploy cannot take it. `PLOW_AGENT_TOKEN` is needed for that
-  one registration and nothing else; the gateway loads it from the home's
-  `.env` at boot, so **a scheduled run inherits it and a `docker exec` session
-  does not** — which is why registering by hand means passing it in.
-- **`HOME=$HERMES_HOME`** — where the client keeps its collection baseline,
-  and where a pre-2026-09-04 install's key still sits. The container's own
-  `HOME` is `/root`, in the image layer that every deploy recreates.
-- **`HERMES_HOME`** — where `state.db` and this install's identity file are.
-  **Inherited from the container, never written down here:** the boot contract
-  moved it from `/opt/data` to `/var/lib/hermes` between two bases, and a
-  literal is how one path outlives the other. A wrong path is not an error; it
-  reads as **zero tokens**, which on a public index looks like an agent nobody
-  uses rather than one nobody configured.
+- **`AGENT_ID`**, from `environment:` in [`compose.yml`](compose.yml). The
+  credential says who the *owner* is; nothing in it says which agent on the
+  index this is. Without it the reporter **stands down rather than guessing a
+  name** — deliberately, because guessing would publish one agent's usage on
+  another's page.
+- **the Index key**, in `$HERMES_HOME/.agent-index.json` **on the volume** —
+  the only credential a report needs, and the file that says *which install*
+  this is. On the volume so a recreated container is still the same install
+  rather than a second one splitting its own numbers.
+- **`PLOW_AGENT_TOKEN`**, for the one registration and nothing else. It is
+  exchanged at Plow for a short-lived assertion; the index mints a
+  report-only key against that. Reports carry the key alone.
+- **`HERMES_HOME`** — where `state.db` is. Fixed by the image at
+  `/var/lib/hermes`, never a second knob: a path that holds no `state.db` is a
+  **collector failure**, and the client stops the whole report rather than
+  overwrite a correct total with a smaller one.
+
+**Registering is not this repo's job on an install that is not the
+publisher's.** `--register` against an agent id somebody else published
+answers 409 — the page stays theirs — and the client mints this install's
+report key anyway. That behaviour arrived in
+[`agent-index-client#11`](https://github.com/plow-pbc/agent-index-client/pull/11)
+on 2026-09-11, and before it the client **exited on the 409**: every install
+but the publisher's own reported nothing, forever, on the single number this
+hackathon ranks by. That is why `vendor/client.pin` names a commit newer than
+the one the reference agent pins.
 
 Publishing the agent itself is a one-time act by whoever owns the id, and needs
 no account of any kind — the container's Plow token is the proof, and the same
 call mints the key every later report uses:
 
 ```sh
-docker exec -e PLOW_AGENT_TOKEN="$PLOW_AGENT_TOKEN" hermes-cfo sh -c \
-  'HOME="$HERMES_HOME" python3 "$HERMES_HOME"/scripts/agent_index_client.py \
+docker compose exec -e HOME=/var/lib/hermes agent \
+  /opt/hermes/.venv/bin/python3 /opt/plow/agent-index-client.py \
   --agent cfo --register \
   --name "cfo" \
   --blurb "A financial manager you text. Log what you spend in plain language, ask where the month is heading — the ledger stays a file on your own Mac." \
   --repo https://github.com/rauppvj/cfo-hermes-agent \
   --runtime "Hermes / Plow" \
   --install-url https://github.com/rauppvj/cfo-hermes-agent/blob/main/docs/INSTALL.md \
-  --image https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/chat-and-panel.png'
+  --image https://raw.githubusercontent.com/rauppvj/cfo-hermes-agent/main/docs/chat-and-panel.png
 ```
 
 **`--install-url` is not optional in practice.** A community agent has no cloud
@@ -305,9 +325,9 @@ with the container's own token since 2026-09-09. Both halves are in
 > the bearer; and is now an Index key minted from that token. Each change made
 > the previous credential a 401 the same day, and the first of them dropped
 > every registration made under the old keys. If reporting is silently at zero,
-> that class of break is the first thing to check: read the log above, re-fetch
-> the client (`agent-mgr deploy <name>` does it on every deploy), and register
-> again to mint a current key.
+> that class of break is the first thing to check: read the service's log
+> above, bump [`vendor/client.pin`](vendor/client.pin) to a current commit of
+> the client and rebuild, and register again to mint a current key.
 </details>
 
 ## Start from the statement, not from typing
@@ -353,8 +373,14 @@ it at all. Every total it reports still comes from `money.py`.
 
 **Step by step, with what each stop asks you for: [`docs/INSTALL.md`](docs/INSTALL.md).**
 
-Prerequisites: `docker` running, `python3` 3.11+, `git`, and an authenticated
-`gh` (`gh auth login`).
+Prerequisites: `docker` running with Compose v2, `python3`, `git`, and a Plow
+account. **That is the whole list** — and it is the list that matters, because
+the Agent Index publishes an install-success rate per agent and this one read
+33% under the old one. What left it: an authenticated GitHub CLI (the
+deprecated deployer fetched the chat plugin with `gh`), a model-provider
+device-code sign-in, a registry row tying one checkout to one instance, and an
+`activate` step that minted a credential, DM'd the owner, bound the agent
+permanently to whichever handset answered, and could never be repeated.
 
 ```sh
 git clone https://github.com/rauppvj/cfo-hermes-agent.git
@@ -362,49 +388,63 @@ cd cfo-hermes-agent
 ./install.sh
 ```
 
-It stops twice, both times for something only you can do: texting an
-activation code from the phone that will own the agent, and entering a device
-code for the model provider. Everything else — installing `agent-mgr`,
-registering, deploying, starting the container, registering the brief — it
-does, and it ends by checking its own work:
+It stops three times, each for something only you can decide: texting a code
+to log this machine in, picking the line the agent will answer on, and
+approving the mint that creates it. Everything else — the Plow CLI, the build,
+the boot, the schedule — it does, and it ends by checking its own work:
 
 ```sh
-docker exec hermes-cfo sh -c 'python3 "$HERMES_HOME"/skills/cfo-shared/scripts/doctor.py'
+docker compose exec agent /opt/hermes/.venv/bin/python3 \
+    /var/lib/hermes/skills/cfo-shared/scripts/doctor.py
 ```
 
 [`doctor.py`](cfo-shared/scripts/doctor.py) exists because every failure this
-install can have is silent: skills mounted where the gateway does not read, a
-usage report failing into a log nobody opens, a stale schedule, a SOUL.md that
-is the image's and not this agent's. One line per check, and what fixes it.
+install can have is silent: skills that land where the gateway does not read, a
+usage report failing where nobody looks, a stale schedule, a panel redrawn
+inside the container where nobody can open it, an identity that is the base's
+and not this agent's. One line per check, and what fixes it. It knows which
+contract it is running under, so no `✗` line sends you to a command that does
+not apply to your install.
 
 **Re-run it whenever.** Every step checks whether it is already done and says
-so instead of repeating it. `activate` is guarded hardest: it is a one-time
-spend that binds the agent permanently to the handset that answers it, so it
-never runs twice.
+so instead of repeating it. Minting is guarded hardest: a credential that
+already exists is never replaced by a second one, because two agents on one
+line both answer the same chat and the owner cannot tell which replied.
 
 <details>
 <summary>What it does, if you would rather run it yourself</summary>
 
 ```sh
-git clone https://github.com/plow-pbc/agent-mgr.git ~/services/agent-mgr
-ln -sf ~/services/agent-mgr/agent-mgr ~/.local/bin/agent-mgr
+git clone https://github.com/plow-pbc/plow-agents.git ~/.local/share/plow-agents
+export PATH="$HOME/.local/share/plow-agents/bin:$PATH"
 
-agent-mgr register cfo /path/to/cfo-hermes-agent
-agent-mgr deploy cfo
-agent-mgr activate cfo      # prints a code — text it from the owner's phone
-agent-mgr up cfo
-agent-mgr cron-sync cfo     # registers the hourly brief tick
-agent-mgr sign-in cfo       # device-code OAuth for the model credential
+plow-agents login              # prints a code — text it from your Plow phone
+plow-agents lines              # pick one whose STATUS is `free`
+plow-agents mint ln_xxx        # writes ./plow-credentials
+docker compose up --build -d
 ```
+
+Three commands and a build. The two supervised services and the two cron rows
+register themselves on the first boot — nothing here schedules anything by
+hand, because a schedule that lives in the home volume is one no rebuild
+replays.
 </details>
 
-**[Plow Latch](https://plow.co/latch) is optional** — the installer offers it
-last and most people should skip it. It lets the agent reach the Mac and pick
-a statement out of `~/Downloads` itself; without it you send the statement to
-the chat as an attachment and the import is identical. Add it later with
-`agent-mgr set-latch cfo && agent-mgr deploy cfo`; the deploy is what turns
-the declaration on, and with no credential on file it stays off rather than
-retrying a connection it cannot make on every boot.
+**What runs, and where it lives**
+
+| what | how | why not the other way |
+|---|---|---|
+| the brief, 08:00 and 22:00 **where the owner lives** | `hermes cron` row, hourly, gated by [`brief_gate.py`](cfo-shared/scripts/brief_gate.py) | it has to wake the model. The gate answers 23 ticks a day with `{"wakeAgent": false}` — no model run, no cost — which is how one schedule is correct in every timezone |
+| a forwarded bank notification | `hermes cron` row, every 5 min, gated by [`notify_gate.py`](cfo-shared/scripts/notify_gate.py) | same: the reply is a model's sentence. The gate is silent unless the Mac actually left something in the inbox |
+| the wall panel | **supervised service**, every 10 min | no model in it at all: a SQLite read and a string of HTML. A cron row would also be lost on a rebuild, and a panel that stops redrawing looks exactly like one that is current |
+| the usage report | **supervised service**, every 5 min | it is the leaderboard, and it must survive a rebuild. In the image or the build failed |
+
+**[Plow Latch](https://plow.co/latch) is optional** — most people should skip
+it. It lets the agent reach the Mac and pick a statement out of `~/Downloads`
+itself; without it you send the statement to the chat as an attachment and the
+import is identical. The credential `mint` writes already carries the
+permission to reach a paired Mac, so there is no separate step for it any more
+(`agent-mgr set-latch` is gone with the deployer).
 
 **There is no timezone to set here.** You tell the agent what city you are in,
 in the chat, and that is the only place the zone lives:
@@ -419,9 +459,10 @@ in the chat, and that is the only place the zone lives:
 > [`brief_gate.py`](cfo-shared/scripts/brief_gate.py) answers every tick that
 > is not a brief hour *for this owner* with `{"wakeAgent": false}` — which the
 > scheduler reads as "skip the agent entirely": no model run, no delivery, no
-> cost. A cron expression could not do this. It fires in the container's zone,
-> which agent-mgr defaults to `America/Los_Angeles` for the whole fleet, so a
-> `0 8 * * *` brief reaches Tokyo at midnight and nothing anywhere reports it.
+> cost. A cron expression could not do this. It fires in the **container's**
+> zone, and the base image sets none — it has no opinion about where a tenant
+> lives — so a `0 8 * * *` brief fires at 08:00 UTC, which is 05:00 in São
+> Paulo and 17:00 in Tokyo, and nothing anywhere reports it.
 > When the gate opens it also names the language the brief is written in —
 > the one the owner writes in, stored on first contact — because the brief
 > has no message above it to mirror, and one morning that was enough for a
@@ -432,8 +473,9 @@ in the chat, and that is the only place the zone lives:
 > an hour, because a schedule that is quietly broken and one that is working
 > look exactly alike.
 
-`activate` is a **one-time spend and the handset that texts the code owns the
-agent permanently** — send it from the phone that should own it.
+A line holds **one** agent. `plow-agents lines` shows which of yours are free;
+minting against one that already answers is refused rather than allowed to
+produce two agents replying in the same chat.
 
 ## Skills
 

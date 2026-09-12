@@ -1,0 +1,26 @@
+#!/command/with-contenv sh
+# Hand the two mounted directories to the agent's uid, before any service runs.
+#
+# compose.yml mounts ./panel and ./inbox from the machine running this, and a
+# bind mount carries that machine's ownership INTO the container. On Docker
+# Desktop that is invisible -- the file sharing layer lets any uid write -- and
+# on a Linux host it is a hard EACCES the first time the panel is drawn: the
+# directory belongs to the person who ran `docker compose up`, and the panel
+# runs as uid 10000. The failure surfaces as a wall screen that never appears,
+# with one line in a service log.
+#
+# So: chown here, as root, in cont-init -- before cfo-panel starts. Not
+# recursive. The point is the directory's write bit, and the files inside a
+# mount belong to whoever wrote them.
+#
+# Never fatal. This runs when the container has no credential yet (a build
+# check, a warm image), and failing the boot over a directory that may not even
+# be mounted would take the gateway down with it. A line on stderr instead.
+set -eu
+
+for directory in /srv/cfo/panel /srv/cfo/inbox /srv/cfo/export; do
+  [ -d "$directory" ] || continue
+  chown hermes:hermes "$directory" 2>/dev/null \
+    || echo "cfo-dirs: could not chown $directory -- if the panel never appears," \
+            "this is why" >&2
+done

@@ -1,0 +1,104 @@
+#!/bin/sh
+# Report this agent's token usage to the Agent Index, every 5 minutes.
+#
+# This is the leaderboard. An agent that runs perfectly and does not report
+# reads as an agent nobody uses, and the failure is silent by construction:
+# the container is up, the phone answers, the page says zero.
+#
+# Baked into the image rather than bind-mounted, and supervised rather than
+# scheduled with `hermes cron`. A mount whose source is missing does not fail,
+# it creates a DIRECTORY at the target -- and the reporter then runs against a
+# directory. A cron row lives in the home's jobs.json, which no rebuild
+# replays, so a recreated container silently stops reporting until somebody
+# registers the row again. Built in and supervised, it is in the image or the
+# build failed.
+#
+# There is no off switch here on purpose. An owner who does not want their
+# usage on the index runs an image built without this service, or comments the
+# service out and rebuilds -- a question the Dockerfile has already answered,
+# and answering it twice creates the case where the two disagree. What is sent
+# is token counts per day per model and one random install id: no prompts, no
+# messages, no ledger, no amounts. The client is one readable file, pinned and
+# checksummed at build: /opt/plow/agent-index-client.py.
+PATH=/command:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+export PATH
+
+# Published by plow-init from the credential the host dropped in, as one file
+# per name. A service inherits the supervision tree's environment, not a login
+# shell's, so these are read from the files rather than expected in `env`.
+PLOW_AGENT_TOKEN=$(cat /run/s6/container_environment/PLOW_AGENT_TOKEN 2>/dev/null || true)
+AGENT_ID=$(cat /run/s6/container_environment/AGENT_ID 2>/dev/null || true)
+export AGENT_ID
+
+# Fixed, not overridable: this image puts the home here, and a second way to
+# say where it is only creates the case where the reporter and the agent
+# disagree about whose usage store is whose. The client reads $HERMES_HOME/state.db
+# and keeps this install's identity beside it, on the volume, so a recreated
+# container is still the same install rather than a second one.
+HERMES_HOME=/var/lib/hermes
+export HERMES_HOME
+
+if [ -z "$AGENT_ID" ]; then
+  echo "agent-index: no AGENT_ID in this container's environment, so there is" >&2
+  echo "no agent to report for -- standing down. Set it under environment: in" >&2
+  echo "compose.yml (AGENT_ID: cfo)." >&2
+  exec sleep 86400
+fi
+
+CLIENT=/opt/plow/agent-index-client.py
+PY=/opt/hermes/.venv/bin/python3
+
+while :; do
+  # Registered already? The CLIENT owns that question -- never test for a file.
+  # Where this install's identity lives is its business and it MOVES it: the
+  # obvious gate (does $HERMES_HOME/.agent-index/token exist) is a path the
+  # client DELETES once its own state file holds the key, so that test answers
+  # "not registered" forever and mints a fresh key every pass.
+  #
+  #   0  registered      3  not registered      2  state is there, unreadable
+  #
+  # 2 is not 3, and collapsing them is the unrecoverable one: registering over
+  # state we could not read mints against a NEW install id and strands every
+  # row the first one published. That pass is skipped instead, loudly.
+  /command/s6-setuidgid hermes \
+    env HOME="$HERMES_HOME" HERMES_HOME="$HERMES_HOME" \
+    "$PY" "$CLIENT" status >/dev/null
+  case $? in
+    0) ;;
+    3)
+      # The Plow token is needed for exactly this: it is exchanged at Plow for
+      # a short-lived assertion, and the index mints a report-only key against
+      # it. Reports below carry the key alone.
+      #
+      # On an id somebody else published -- which is every install but the
+      # publisher's own -- the index answers 409, keeps their page, and mints
+      # this install's key anyway. The client pinned in vendor/client.pin is
+      # the first one that does that instead of exiting; with the older one
+      # every installer of every agent on this index reported nothing.
+      /command/s6-setuidgid hermes \
+        env HOME="$HERMES_HOME" HERMES_HOME="$HERMES_HOME" AGENT_ID="$AGENT_ID" \
+            PLOW_AGENT_TOKEN="$PLOW_AGENT_TOKEN" \
+        "$PY" "$CLIENT" --register --agent "$AGENT_ID" >/dev/null || {
+          echo "agent-index: no index key this pass, not reporting" >&2
+          /bin/sleep 300
+          continue
+        }
+      ;;
+    *)
+      echo "agent-index: the client could not read this install's state (above);" >&2
+      echo "standing off rather than registering over it." >&2
+      /bin/sleep 300
+      continue
+      ;;
+  esac
+
+  # No PLOW_AGENT_TOKEN here: the report goes with the stored key.
+  #
+  # Never fatal. A crashing longrun is respawned immediately, which turns one
+  # bad pass -- a network blip, a 502 -- into a hot loop against the index.
+  /command/s6-setuidgid hermes \
+    env HOME="$HERMES_HOME" HERMES_HOME="$HERMES_HOME" AGENT_ID="$AGENT_ID" \
+    "$PY" "$CLIENT" \
+    || echo "agent-index: reporter exited non-zero, see the line above" >&2
+  /bin/sleep 300
+done

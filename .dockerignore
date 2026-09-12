@@ -1,0 +1,21 @@
+# The build context is the repo root, so only this agent's own content belongs
+# in it. Everything dropped here is either not read by a layer or must never
+# reach one.
+.git
+.venv
+**/__pycache__
+**/*.py[co]
+**/.pytest_cache
+.pytest_cache
+# The live agent token `plow-agents mint` writes beside compose.yml. Without
+# this line it is reachable from a COPY, which would bake one install's
+# credential into an image other people run.
+plow-credentials
+# Written by the running container, through the mounts in compose.yml.
+panel
+# Read by people, not by the image: 600KB of screenshots whose only effect on
+# a build is to re-send the context every time one of them changes.
+docs
+tests
+legacy
+README.md

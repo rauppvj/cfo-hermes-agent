@@ -120,9 +120,16 @@ Most Brazilian banks alert by push, not SMS — and iOS gives Shortcuts no way
 to read a push. The Mac can. With **iPhone Mirroring** set up, your iPhone's
 notifications appear on the Mac, and macOS keeps them in a local database.
 A small script reads that database once a minute and drops the ones that
-carry an amount into the agent's inbox, on the same Mac the agent already
-runs on. The container picks them up every five minutes, records them, and
-the agent says what it recorded in one line.
+carry an amount into a directory `compose.yml` mounts into the container. The
+agent picks them up every five minutes, records them by code, and says what it
+recorded in one line.
+
+That directory is `~/.cfo/inbox`, under your home and **not** in the checkout
+— which is the one detail that makes this work at all. launchd runs without
+the Files-and-Folders grants a terminal has, so a watcher whose inbox sits in
+a repo under `~/Desktop` or `~/Documents` cannot even open it, once a minute,
+into a log nobody reads. The installer refuses those paths rather than
+producing that.
 
 **On the Mac**, from the repo:
 
@@ -142,15 +149,20 @@ Then the two things a script cannot do for you, once each:
 Check it:
 
 ```sh
-/usr/bin/python3 cfo-shared/scripts/notify_watch.py --check      # readable?
-/usr/bin/python3 cfo-shared/scripts/notify_watch.py --dump 20    # the newest notifications; $ marks an amount
-tail ~/.hermes-cfo/logs/notify.log
+/usr/bin/python3 ~/.cfo/scripts/notify_watch.py --check      # readable?
+/usr/bin/python3 ~/.cfo/scripts/notify_watch.py --dump 20    # the newest notifications; $ marks an amount
+tail ~/.cfo/logs/notify.log
+docker compose exec agent tail -3 /srv/cfo/inbox/notifications.jsonl   # what the agent sees
 ```
+
+Run the watcher from `~/.cfo/scripts`, not from the checkout: that copy is
+the one launchd runs, `install-notify.sh` refreshes it, and a check against
+the other copy can pass while the one on the schedule is stale.
 
 What it forwards: only notifications with an amount in them — from any
 app, so a bank you did not think to list still counts. What it never
 forwards: anything else on your screen. The file it writes is
-`~/.hermes-cfo/inbox/notifications.jsonl`, and you can read it.
+`~/.cfo/inbox/notifications.jsonl`, and you can read it.
 
 The watcher starts from **now**: last week's notifications are last week's
 purchases, and the statement import is the honest way to get those.

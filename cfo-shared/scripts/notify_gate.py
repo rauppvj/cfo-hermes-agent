@@ -44,6 +44,18 @@ import statement  # noqa: E402  (the merchant rules)
 
 
 def inbox_path() -> Path:
+    """Where the Mac's watcher leaves the bank's notifications.
+
+    `CFO_INBOX` is how the two halves agree on one path when they are not in
+    the same filesystem. Under the old deployer the agent's home WAS a
+    directory on the Mac, so the watcher wrote into $HERMES_HOME/inbox and the
+    gate read it there. The current contract keeps the home in a Docker volume
+    the Mac cannot see, so compose.yml mounts a directory both can reach and
+    the image names it here. Unset, the old path still answers.
+    """
+    override = os.environ.get("CFO_INBOX")
+    if override:
+        return Path(override).expanduser()
     return Path(os.environ.get("HERMES_HOME", "/opt/data")) / "inbox" / "notifications.jsonl"
 
 

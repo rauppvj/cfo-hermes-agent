@@ -1,0 +1,40 @@
+#!/bin/sh
+# Redraw the wall panel from the ledger, every ten minutes.
+#
+# The panel is the second surface: the same month the chat answers about, as
+# one page on the owner's own disk, full-screen on a spare monitor or an old
+# iPad. It is written to a host directory (compose.yml mounts ./panel), which
+# is the whole point -- a page inside a Docker volume is a page nobody can open.
+#
+# No model, ever. This is a SQLite read and a string of HTML: waking the agent
+# every ten minutes to render a page would cost tokens and, worse, would put a
+# model between the ledger and what the page says.
+#
+# Supervised rather than a cron row for the reason the reporter is: a cron row
+# lives in the home's jobs.json, which nothing replays after a rebuild, so the
+# panel would quietly stop updating on a machine where everything else works.
+PATH=/command:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+export PATH
+
+HERMES_HOME=/var/lib/hermes
+export HERMES_HOME
+
+# The root-owned copy, not the one under the home's skills/ -- that one belongs
+# to uid 10000 in a running container, so scheduling it would turn a single
+# prompt-injected edit into code that runs unattended forever. The agent still
+# runs the home copy by hand during a turn; only the SCHEDULE points here.
+PANEL=/opt/plow/cfo-shared/scripts/panel.py
+PY=/opt/hermes/.venv/bin/python3
+
+while :; do
+  # Before the ledger exists there is nothing to draw and saying so every ten
+  # minutes is noise, so the first message's write is what starts this.
+  if [ -f "$HERMES_HOME/cfo/ledger.db" ]; then
+    /command/s6-setuidgid hermes \
+      env HOME="$HERMES_HOME" HERMES_HOME="$HERMES_HOME" \
+          CFO_PANEL="${CFO_PANEL:-/srv/cfo/panel/index.html}" \
+      "$PY" "$PANEL" >/dev/null \
+      || echo "cfo-panel: panel.py exited non-zero, see the line above" >&2
+  fi
+  /bin/sleep 600
+done
